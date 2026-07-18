@@ -296,8 +296,10 @@ export function computeRepStats(
   roster?: readonly string[],
 ): RepStat[] {
   const names = roster ?? (team === "bdr" ? DEFAULT_BDRS : AES);
+  // Cards show all-time won value, so compare against the ANNUAL quota
+  // (a BDR's yearly target is bdrMonthly × 12 = bdrAnnual), not the monthly.
   const target =
-    team === "bdr" ? QUOTA.bdrMonthly : QUOTA.teamMonthly / (names.length || 1);
+    team === "bdr" ? QUOTA.bdrAnnual : QUOTA.teamAnnual / (names.length || 1);
 
   return names.map((name) => {
     const mine = rows.filter((r) => (team === "bdr" ? r.bdr : r.ae) === name);
