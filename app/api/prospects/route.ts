@@ -50,6 +50,7 @@ const TEAM_AES = new Set([
   "Tor Gordon",
   "Gavin Winchell",
   "Garrett Martel", // HubSpot spelling (garrett@corgi.insure)
+  "Samuel Noyce", // "Sam" in HubSpot is registered as Samuel Noyce
 ]);
 
 // HubSpot's internal stage IDs → the dashboard's stage names.
