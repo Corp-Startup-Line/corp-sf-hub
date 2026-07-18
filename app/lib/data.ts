@@ -221,8 +221,9 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   const inStage = (stage: Stage) =>
     rows.filter((r) => r.stage === stage).length;
 
+  // Every deal is at least a booked meeting, so a "Meetings Booked" card would
+  // just repeat "Total Deals" — it's deliberately left out of the funnel.
   const totalDeals = rows.length;
-  const meetings = inStage("Meeting Booked");
   const qualified = inStage("Qualified");
   const quoted = inStage("Quoted");
   const won = inStage("Closed Won");
@@ -233,7 +234,6 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
 
   return [
     { label: "Total Deals", count: totalDeals, pct: 100, filter: "all" },
-    { label: "Meetings Booked", count: meetings, pct: pct(meetings), filter: "Meeting Booked" },
     { label: "Qualified", count: qualified, pct: pct(qualified), filter: "Qualified" },
     { label: "Quoted", count: quoted, pct: pct(quoted), filter: "Quoted" },
     { label: "Closed Won", count: won, pct: pct(won), filter: "Closed Won" },

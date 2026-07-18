@@ -125,7 +125,7 @@ export function Funnel({
   return (
     <section className="mb-10">
       <SectionLabel>Conversion Funnel</SectionLabel>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         {funnel.map((s) => {
           const tone = funnelTone(s.filter);
           const active = activeStage !== "all" && s.filter === activeStage;
