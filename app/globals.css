@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* Make `dark:` classes respond to a `.dark` class on <html> (our toggle),
+   instead of only the operating-system setting. */
+@custom-variant dark (&:where(.dark, .dark *));
 
+/* Apple-style system font stack + Corgi brand colours available as tokens. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* Corgi palette: warm ginger + fawn + cream. */
+  --color-corgi-ginger: #c9762f;
+  --color-corgi-tan: #e0a568;
+  --color-corgi-cream: #f6efe4;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Light mode: warm Corgi cream base with soft ginger + fawn glows. */
+body {
+  background-color: #f4ebdd;
+  background-image: radial-gradient(
+      1100px 620px at 100% -12%,
+      rgba(201, 118, 47, 0.14),
+      transparent 60%
+    ),
+    radial-gradient(
+      950px 520px at -8% 4%,
+      rgba(224, 165, 104, 0.16),
+      transparent 58%
+    );
+  color: #2b2016;
+  min-height: 100vh;
+  letter-spacing: -0.01em;
+}
+
+/* Dark mode: warm near-black with the same ginger glow, kept subtle. */
+html.dark body {
+  background-color: #14100b;
+  background-image: radial-gradient(
+      1100px 620px at 100% -12%,
+      rgba(201, 118, 47, 0.18),
+      transparent 60%
+    ),
+    radial-gradient(
+      950px 520px at -8% 4%,
+      rgba(224, 165, 104, 0.1),
+      transparent 58%
+    );
+  color: #f2e9dc;
+}
+
+/* The pulsing "live" dot next to the title. */
+@keyframes livePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.live-dot {
+  animation: livePulse 2s infinite;
 }
