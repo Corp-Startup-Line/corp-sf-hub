@@ -87,8 +87,14 @@ export default function Dashboard() {
   const values = useMemo(() => computeDealValues(rows), [rows]);
   const quota = useMemo(() => computeQuota(rows, filters), [rows, filters]);
   const repStats = useMemo(
-    () => computeRepStats(rows, team, team === "bdr" ? bdrs : dataAes),
-    [rows, team, bdrs, dataAes],
+    () =>
+      computeRepStats(
+        rows,
+        team,
+        team === "bdr" ? bdrs : dataAes,
+        filters.month !== "all",
+      ),
+    [rows, team, bdrs, dataAes, filters.month],
   );
   const kpis = useMemo(() => computeKpis(rows), [rows]);
   const trend = useMemo(() => computeMonthlyTrend(rows), [rows]);
