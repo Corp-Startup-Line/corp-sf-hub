@@ -49,7 +49,7 @@ const TEAM_AES = new Set([
   "Drew Gordillo",
   "Tor Gordon",
   "Gavin Winchell",
-  "Garett Martell", // no matching HubSpot owner yet — won't show until created
+  "Garrett Martel", // HubSpot spelling (garrett@corgi.insure)
 ]);
 
 // HubSpot's internal stage IDs → the dashboard's stage names.
