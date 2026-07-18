@@ -11,12 +11,10 @@ import {
   computeKpis,
   computeMonthlyTrend,
   computeInsights,
-  loadBdrRoster,
-  saveBdrRoster,
-  DEFAULT_BDRS,
   DEFAULT_FILTERS,
   type Filters,
   type Stage,
+  type Prospect,
 } from "../lib/data";
 import { Skeleton } from "../lib/ui";
 import Header from "./Header";
@@ -35,37 +33,63 @@ export default function Dashboard() {
   const [stageFilter, setStageFilter] = useState<Stage | "all">("all");
   const [loading, setLoading] = useState(true);
 
-  // The live BDR roster. Seeded from the default list, then replaced with the
-  // saved roster from the browser after mount (done in an effect to avoid a
-  // server/client mismatch). Editing it via "Manage BDRs" persists to storage.
-  const [bdrs, setBdrs] = useState<string[]>([...DEFAULT_BDRS]);
+  // ---- Load the real deals from our server route (falls back to sample
+  // data inside getProspects if HubSpot is unavailable). ----
+  const [allRows, setAllRows] = useState<Prospect[]>([]);
   useEffect(() => {
-    setBdrs(loadBdrRoster());
+    let alive = true;
+    getProspects().then((data) => {
+      if (!alive) return;
+      setAllRows(data);
+      setLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
+
+  // The BDR roster is derived straight from the deals (whoever actually has
+  // deals in HubSpot), so it's always in sync with the data — no hardcoded list.
+  const dataBdrs = useMemo(
+    () =>
+      Array.from(
+        new Set(allRows.map((r) => r.bdr).filter((b) => b && b !== "Unassigned")),
+      ).sort(),
+    [allRows],
+  );
+
+  // Same idea for AEs (the deal owners), used by the AE breakdown tab.
+  const dataAes = useMemo(
+    () =>
+      Array.from(
+        new Set(allRows.map((r) => r.ae).filter((a) => a && a !== "Unassigned")),
+      ).sort(),
+    [allRows],
+  );
+
+  // "Manage BDRs" can tweak this in-session; it re-syncs when data reloads.
+  const [bdrs, setBdrs] = useState<string[]>([]);
+  useEffect(() => {
+    setBdrs(dataBdrs);
+  }, [dataBdrs]);
 
   function updateBdrs(next: string[]) {
     setBdrs(next);
-    saveBdrRoster(next);
     // If the currently-filtered BDR was removed, drop back to "all".
     if (filters.bdr !== "all" && !next.includes(filters.bdr)) {
       setFilters({ ...filters, bdr: "all" });
     }
   }
 
-  // Pretend to "load data" for a moment so the skeletons are visible. When you
-  // switch to a real API, this is where you'd fetch instead.
-  useEffect(() => {
-    const id = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(id);
-  }, []);
-
   // ---- Derived data (recalculated only when inputs change) ----
-  const allRows = useMemo(() => getProspects(), []);
   const rows = useMemo(() => filterProspects(allRows, filters), [allRows, filters]);
   const funnel = useMemo(() => computeFunnel(rows), [rows]);
   const values = useMemo(() => computeDealValues(rows), [rows]);
   const quota = useMemo(() => computeQuota(rows, filters), [rows, filters]);
-  const repStats = useMemo(() => computeRepStats(rows, team, bdrs), [rows, team, bdrs]);
+  const repStats = useMemo(
+    () => computeRepStats(rows, team, team === "bdr" ? bdrs : dataAes),
+    [rows, team, bdrs, dataAes],
+  );
   const kpis = useMemo(() => computeKpis(rows), [rows]);
   const trend = useMemo(() => computeMonthlyTrend(rows), [rows]);
   const insights = useMemo(() => computeInsights(rows), [rows]);

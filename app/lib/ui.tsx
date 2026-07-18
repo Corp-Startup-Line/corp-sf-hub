@@ -37,7 +37,7 @@ export function prettyDate(iso: string | null): string {
 // the big number inside it (e.g. an emerald card for a green "Closed Won"). The
 // gradient strings are written out in full — not built by string-joining — so
 // Tailwind can see and generate every one of them.
-export type TintName = "ginger" | "violet" | "sky" | "amber" | "emerald" | "rose";
+export type TintName = "ginger" | "violet" | "sky" | "amber" | "emerald" | "rose" | "slate";
 
 // Coloured glass: a stronger colour along the top edge fading to near-clear at
 // the bottom, so it still reads as glass rather than a flat colour block. Each
@@ -49,6 +49,7 @@ const TINT_GRADIENT: Record<TintName, string> = {
   amber: "from-amber-500/25 to-white/20 dark:from-amber-500/25 dark:to-white/[0.03]",
   emerald: "from-emerald-500/25 to-white/20 dark:from-emerald-500/25 dark:to-white/[0.03]",
   rose: "from-rose-500/25 to-white/20 dark:from-rose-500/25 dark:to-white/[0.03]",
+  slate: "from-slate-500/25 to-white/20 dark:from-slate-500/25 dark:to-white/[0.03]",
 };
 
 const NEUTRAL_GRADIENT =
@@ -123,6 +124,7 @@ const STAGE_STYLES: Record<Stage, string> = {
   Qualified: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
   Quoted: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   "Meeting Booked": "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+  "Closed Lost": "bg-slate-500/15 text-slate-600 dark:text-slate-400",
 };
 
 export function StageBadge({ stage }: { stage: Stage }) {

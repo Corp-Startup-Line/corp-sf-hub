@@ -72,7 +72,7 @@ export default function Header() {
           <LiveDot />
         </div>
         <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-          Last updated {updated ?? "—"} · sample data (no live API yet)
+          Last updated {updated ?? "—"} · live from HubSpot
         </p>
       </div>
       <ThemeToggle />

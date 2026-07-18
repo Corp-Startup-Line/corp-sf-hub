@@ -18,18 +18,20 @@ export const STAGES = [
   "Quoted",
   "Closed Won",
   "Ghosting",
+  "Closed Lost",
 ] as const;
 
 export type Stage = (typeof STAGES)[number];
 
 // How "far along" each stage is. Higher = further down the funnel.
-// Ghosting is -1 because it's a dropout, not a step forward.
+// Ghosting and Closed Lost are -1 because they're dropouts, not steps forward.
 export const STAGE_RANK: Record<Stage, number> = {
   "Meeting Booked": 1,
   Qualified: 2,
   Quoted: 3,
   "Closed Won": 4,
   Ghosting: -1,
+  "Closed Lost": -1,
 };
 
 // ---- The team -------------------------------------------------------------
@@ -163,13 +165,22 @@ const PROSPECTS: Prospect[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// FUTURE API SWAP POINT.
-// Right now this returns the fake rows above. Later, change the body to:
-//   const res = await fetch("/api/prospects"); return res.json();
-// and everything else keeps working.
+// THE API SWAP POINT — now live.
+// Asks our own server route (/api/prospects) for the real deals. That route
+// talks to HubSpot with the secret key (which never reaches the browser) and
+// hands back rows in exactly the Prospect shape above. If the call fails or
+// comes back empty, we fall back to the sample rows so the page still works.
 // ---------------------------------------------------------------------------
-export function getProspects(): Prospect[] {
-  return PROSPECTS;
+export async function getProspects(): Promise<Prospect[]> {
+  try {
+    const res = await fetch("/api/prospects", { cache: "no-store" });
+    if (!res.ok) throw new Error(`prospects API returned ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) return data as Prospect[];
+    return PROSPECTS;
+  } catch {
+    return PROSPECTS;
+  }
 }
 
 // ===========================================================================
@@ -216,6 +227,7 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   const quoted = inStage("Quoted");
   const won = inStage("Closed Won");
   const ghosting = inStage("Ghosting");
+  const lost = inStage("Closed Lost");
 
   const pct = (n: number) => Math.round((n / total) * 100);
 
@@ -226,6 +238,7 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
     { label: "Quoted", count: quoted, pct: pct(quoted), filter: "Quoted" },
     { label: "Closed Won", count: won, pct: pct(won), filter: "Closed Won" },
     { label: "Ghosting", count: ghosting, pct: pct(ghosting), filter: "Ghosting" },
+    { label: "Closed Lost", count: lost, pct: pct(lost), filter: "Closed Lost" },
   ];
 }
 
@@ -275,16 +288,16 @@ export type RepStat = {
   quotaPct: number;
 };
 
-// Per-person cards for either BDRs or AEs. For BDRs you can pass the live
-// roster (from loadBdrRoster) so newly added / removed BDRs show up correctly;
-// it defaults to the seed list when not provided.
+// Per-person cards for either BDRs or AEs. Pass the roster of names to show
+// (derived from the live deals). Falls back to the seed lists when not given.
 export function computeRepStats(
   rows: Prospect[],
   team: "bdr" | "ae",
-  bdrNames: readonly string[] = DEFAULT_BDRS,
+  roster?: readonly string[],
 ): RepStat[] {
-  const names = team === "bdr" ? bdrNames : AES;
-  const target = team === "bdr" ? QUOTA.bdrMonthly : QUOTA.teamMonthly / AES.length;
+  const names = roster ?? (team === "bdr" ? DEFAULT_BDRS : AES);
+  const target =
+    team === "bdr" ? QUOTA.bdrMonthly : QUOTA.teamMonthly / (names.length || 1);
 
   return names.map((name) => {
     const mine = rows.filter((r) => (team === "bdr" ? r.bdr : r.ae) === name);
@@ -360,8 +373,9 @@ export function computeInsights(rows: Prospect[]): Insight[] {
     .filter((r) => openStages.includes(r.stage))
     .sort((a, b) => b.quote - a.quote);
 
-  // Top-closing BDR by won value.
-  const topBdr = computeRepStats(rows, "bdr")
+  // Top-closing BDR by won value (roster derived from the rows in view).
+  const bdrRoster = Array.from(new Set(rows.map((r) => r.bdr).filter(Boolean)));
+  const topBdr = computeRepStats(rows, "bdr", bdrRoster)
     .filter((s) => s.wonValue > 0)
     .sort((a, b) => b.wonValue - a.wonValue)[0];
   if (topBdr) {
@@ -429,7 +443,7 @@ export function daysSinceContact(p: Prospect, today: string = TODAY): number | n
 // Logging a newer lastContact date automatically pulls it back to "safe".
 export function dealHealth(p: Prospect, today: string = TODAY): DealHealth {
   if (p.stage === "Closed Won") return "won";
-  if (p.stage === "Ghosting") return "risk";
+  if (p.stage === "Ghosting" || p.stage === "Closed Lost") return "risk";
   const d = daysSinceContact(p, today);
   // An open deal with no positive contact logged still needs a chase, so it
   // reads amber ("chase soon") rather than sitting there uncoloured.

@@ -64,6 +64,7 @@ const FUNNEL_TONE: Record<Stage | "all", { num: string; bar: string; tint: TintN
   Quoted: { num: "text-amber-600 dark:text-amber-400", bar: "bg-amber-500", tint: "amber" },
   "Closed Won": { num: "text-emerald-600 dark:text-emerald-400", bar: "bg-emerald-500", tint: "emerald" },
   Ghosting: { num: "text-rose-600 dark:text-rose-400", bar: "bg-rose-500", tint: "rose" },
+  "Closed Lost": { num: "text-slate-600 dark:text-slate-400", bar: "bg-slate-500", tint: "slate" },
 };
 
 function funnelTone(filter: Stage | "all"): { num: string; bar: string; tint: TintName } {
@@ -124,7 +125,7 @@ export function Funnel({
   return (
     <section className="mb-10">
       <SectionLabel>Conversion Funnel</SectionLabel>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-7">
         {funnel.map((s) => {
           const tone = funnelTone(s.filter);
           const active = activeStage !== "all" && s.filter === activeStage;
