@@ -169,10 +169,19 @@ export default function Dashboard() {
             </section>
           ) : (
             <>
-              <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <WonTrend data={trend} />
-                <RepLeaderboard stats={repStats} teamLabel={team === "bdr" ? "BDR" : "AE"} />
-              </section>
+              {/* The leaderboard is a BDR-quota comparison, so it only shows on
+                  the BDR tab. On the AE tab it's hidden and the Won-value trend
+                  takes the full width. */}
+              {team === "bdr" ? (
+                <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <WonTrend data={trend} />
+                  <RepLeaderboard stats={repStats} teamLabel="BDR" />
+                </section>
+              ) : (
+                <section className="mb-10">
+                  <WonTrend data={trend} />
+                </section>
+              )}
 
               <RepCards
                 team={team}
@@ -180,6 +189,7 @@ export default function Dashboard() {
                 stats={repStats}
                 selected={selectedRep}
                 onSelect={selectRep}
+                showQuota={team === "bdr"}
               />
             </>
           )}

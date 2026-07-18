@@ -240,12 +240,14 @@ export function RepCards({
   stats,
   selected,
   onSelect,
+  showQuota = true,
 }: {
   team: "bdr" | "ae";
   setTeam: (t: "bdr" | "ae") => void;
   stats: RepStat[];
   selected: string; // "all" or a rep name
   onSelect: (name: string) => void;
+  showQuota?: boolean; // AEs don't carry a BDR quota, so hide the bar for them
 }) {
   return (
     <section className="mb-10">
@@ -273,7 +275,9 @@ export function RepCards({
           <Card key={r.name} onClick={() => onSelect(r.name)} active={selected === r.name}>
             <div className="flex items-center justify-between">
               <span className="font-medium">{r.name}</span>
-              <span className="text-sm text-neutral-400">{r.quotaPct}%</span>
+              {showQuota && (
+                <span className="text-sm text-neutral-400">{r.quotaPct}%</span>
+              )}
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
               <Stat label="Deals" value={r.prospects} />
@@ -288,9 +292,11 @@ export function RepCards({
                 {moneyFull(r.wonValue)}
               </span>
             </div>
-            <div className="mt-2">
-              <ProgressBar pct={r.quotaPct} />
-            </div>
+            {showQuota && (
+              <div className="mt-2">
+                <ProgressBar pct={r.quotaPct} />
+              </div>
+            )}
           </Card>
         ))}
       </div>
