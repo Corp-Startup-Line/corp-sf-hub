@@ -15,6 +15,24 @@ export const dynamic = "force-dynamic";
 
 const HUBSPOT_BASE = "https://api.hubapi.com";
 
+// YOUR BDR team — only deals whose HubSpot "BDR" field is one of these people
+// show in the dashboard. Everyone else's / company-wide deals are ignored.
+// Names must match the HubSpot owner's full name exactly. Edit this list to
+// add or remove a teammate.
+const TEAM_BDRS = new Set([
+  "Jed Clark",
+  "Oz Harkavi",
+  "Ben Boneham",
+  "Daryl Wilson",
+  "Gabriel Serrano",
+  "Carwyn Chiramel",
+  "Luke Jopling",
+  "Dino Citti",
+  "Andrew Bagasbas",
+  "Parker Horton",
+  "Amos Book",
+]);
+
 // HubSpot's internal stage IDs → the dashboard's stage names.
 // (Mapping confirmed with Carwyn: Contract Sent folds into Quoted; HubSpot's
 // "Closed Lost" shows as Ghosting; HubSpot's "Disqualified" shows as Closed Lost.)
@@ -113,7 +131,10 @@ function mapDeal(
   const stage = STAGE_BY_HUBSPOT[p.dealstage ?? ""];
   if (!stage) return null; // stage we don't track → skip
 
-  const bdr = p.bdr ? owners.get(p.bdr) ?? "Unassigned" : "Unassigned";
+  // Only keep deals owned by one of OUR BDRs (see TEAM_BDRS above).
+  const bdrName = p.bdr ? owners.get(p.bdr) : undefined;
+  if (!bdrName || !TEAM_BDRS.has(bdrName)) return null;
+  const bdr = bdrName;
   const ae = p.hubspot_owner_id
     ? owners.get(p.hubspot_owner_id) ?? "Unassigned"
     : "Unassigned";
