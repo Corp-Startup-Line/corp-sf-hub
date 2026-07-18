@@ -39,6 +39,19 @@ const TEAM_BDRS = new Set([
   "Amos Book",
 ]);
 
+// YOUR AE team — a deal's "owner" in HubSpot is the AE. Only these six people
+// are corp AEs; any other owner (including BDRs who happen to own a deal) is
+// shown as "Unassigned" on the AE side so they don't clutter the AE cards.
+// Names must match the HubSpot owner's full name exactly.
+const TEAM_AES = new Set([
+  "Matthew Elmer", // "Matt" in HubSpot is registered as Matthew Elmer
+  "Alex Frankel",
+  "Drew Gordillo",
+  "Tor Gordon",
+  "Gavin Winchell",
+  "Garett Martell", // no matching HubSpot owner yet — won't show until created
+]);
+
 // HubSpot's internal stage IDs → the dashboard's stage names.
 // (Mapping confirmed with Carwyn: Contract Sent folds into Quoted; HubSpot's
 // "Closed Lost" shows as Ghosting; HubSpot's "Disqualified" shows as Closed Lost.)
@@ -173,9 +186,12 @@ function mapDeal(
   // the display names. Keep the on-team guard as a belt-and-braces check.
   const bdr = p.bdr ? id2name.get(p.bdr) ?? "Unassigned" : "Unassigned";
   if (!TEAM_BDRS.has(bdr)) return null;
-  const ae = p.hubspot_owner_id
+  const ownerName = p.hubspot_owner_id
     ? id2name.get(p.hubspot_owner_id) ?? "Unassigned"
     : "Unassigned";
+  // Only surface corp AEs; anyone else's name becomes "Unassigned" so they
+  // don't appear as an AE card/filter option (the deal itself is kept).
+  const ae = TEAM_AES.has(ownerName) ? ownerName : "Unassigned";
   const when = p.closedate || p.createdate || "";
 
   return {
