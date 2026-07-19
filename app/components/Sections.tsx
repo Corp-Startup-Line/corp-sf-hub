@@ -227,7 +227,7 @@ export function QuotaAndRevenue({
         <div className="text-3xl font-medium text-emerald-600 dark:text-emerald-400">
           {money(confirmed)}
         </div>
-        <div className="mt-2 text-xs text-neutral-400">via Django CRM (sample)</div>
+        <div className="mt-2 text-xs text-neutral-400">via Corgi — purchased quotes</div>
       </Card>
     </section>
   );

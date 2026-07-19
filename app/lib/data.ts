@@ -116,9 +116,21 @@ export type Prospect = {
   quote: number;               // deal value
   notes: string;
   month: string;               // e.g. "2026-03"
-  confirmed: boolean;          // revenue confirmed in Django CRM (won deals)
+  confirmed: boolean;          // Corgi quote was purchased (real confirmed revenue)
   lastContact: string | null;  // ISO date of the last positive contact (null = never)
+  // ---- Real Corgi/Django quote data (attached by the server route) ---------
+  // Left undefined on the sample rows below; set for every live deal.
+  hasCorgiQuote?: boolean;     // a matching quote exists in Corgi/Django
+  corgiStatus?: string | null; // e.g. "purchased", "quoted"
+  corgiPremium?: number;       // annual premium (USD) from the matched quote
 };
+
+// A deal counts as "Quoted" when Corgi/Django actually has a quote for it. The
+// sample rows below have no Corgi data, so they fall back to the HubSpot stage
+// and the demo funnel still works.
+export function isQuoted(p: Prospect): boolean {
+  return p.hasCorgiQuote ?? p.stage === "Quoted";
+}
 
 // ---------------------------------------------------------------------------
 // THE FAKE ROWS. Each line is one deal. Edit freely — the whole dashboard
@@ -225,7 +237,8 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   // just repeat "Total Deals" — it's deliberately left out of the funnel.
   const totalDeals = rows.length;
   const qualified = inStage("Qualified");
-  const quoted = inStage("Quoted");
+  // "Quoted" is driven by real Corgi/Django quotes, not the HubSpot stage.
+  const quoted = rows.filter(isQuoted).length;
   const won = inStage("Closed Won");
   const ghosting = inStage("Ghosting");
   const lost = inStage("Closed Lost");
@@ -255,10 +268,11 @@ export function computeDealValues(rows: Prospect[]): DealValues {
   const wonRows = rows.filter((r) => r.stage === "Closed Won");
   const won = sum(wonRows, "quote");
   const avgDeal = wonRows.length ? Math.round(won / wonRows.length) : 0;
-  const confirmed = sum(
-    rows.filter((r) => r.stage === "Closed Won" && r.confirmed),
-    "quote",
-  );
+  // Confirmed revenue = real premiums from purchased Corgi quotes. Sample rows
+  // have no premium, so they fall back to the deal amount for the demo.
+  const confirmed = rows
+    .filter((r) => r.confirmed)
+    .reduce((acc, r) => acc + (r.corgiPremium || r.quote), 0);
   return { pipeline, won, avgDeal, confirmed };
 }
 
@@ -312,7 +326,7 @@ export function computeRepStats(
       name,
       prospects: mine.length,
       meetings: mine.filter((r) => STAGE_RANK[r.stage] >= 1).length,
-      quoted: mine.filter((r) => STAGE_RANK[r.stage] >= 3).length,
+      quoted: mine.filter(isQuoted).length,
       wonCount: wonRows.length,
       wonValue,
       quotaPct: Math.round((wonValue / target) * 100),

@@ -10,10 +10,15 @@
 // ============================================================================
 
 import type { Prospect, Stage } from "../../lib/data";
+import { getCorgiIndex, matchCompany, type CorgiMatch } from "./corgi";
 
 // Always run fresh on each request (read the live key + live deals), never
 // cached at build time.
 export const dynamic = "force-dynamic";
+// Corgi's API can only be paged (no company filter) and throttles hard, so a
+// cold pull of all quotes takes ~30s. Allow up to 60s so Vercel doesn't cut it
+// off; after the first pull it's cached in memory and responses are instant.
+export const maxDuration = 60;
 
 const HUBSPOT_BASE = "https://api.hubapi.com";
 
@@ -178,6 +183,7 @@ function toDate(iso: string | null | undefined): string | null {
 function mapDeal(
   d: HubSpotDeal,
   id2name: Map<string, string>,
+  corgi: Map<string, CorgiMatch> | null,
 ): Prospect | null {
   const p = d.properties;
   const stage = STAGE_BY_HUBSPOT[p.dealstage ?? ""];
@@ -195,9 +201,16 @@ function mapDeal(
   const ae = TEAM_AES.has(ownerName) ? ownerName : "Unassigned";
   const when = p.closedate || p.createdate || "";
 
-  return {
+  const company = (p.dealname ?? "Untitled")
+    .replace(/\s*-\s*New Deal\s*$/i, "")
+    .trim();
+  // Attach the real Corgi/Django quote for THIS company, if one exists. When
+  // the Corgi index is unavailable (null), leave the quote fields undefined so
+  // the dashboard falls back to the HubSpot stage instead of showing zeroes.
+  const quote = corgi ? matchCompany(corgi, company) : null;
+  const base: Prospect = {
     id: Number(d.id),
-    company: (p.dealname ?? "Untitled").replace(/\s*-\s*New Deal\s*$/i, "").trim(),
+    company,
     stage,
     bdr,
     ae,
@@ -206,8 +219,17 @@ function mapDeal(
     quote: Math.round(Number(p.amount) || 0),
     notes: "",
     month: when.slice(0, 7), // "YYYY-MM"
-    confirmed: stage === "Closed Won", // placeholder until Corgi/Django is wired
+    confirmed: stage === "Closed Won", // fallback until Corgi says otherwise
     lastContact: toDate(p.notes_last_contacted),
+  };
+  if (!corgi) return base; // Corgi unavailable → stage-based fallback only
+
+  return {
+    ...base,
+    confirmed: quote?.purchased ?? false, // real: the Corgi quote was bought
+    hasCorgiQuote: quote !== null, // real: Corgi/Django has a quote for it
+    corgiStatus: quote?.status ?? null,
+    corgiPremium: quote?.premium ?? 0,
   };
 }
 
@@ -224,9 +246,14 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   const bdrIds = [...TEAM_BDRS]
     .map((name) => name2id.get(name))
     .filter((id): id is string => Boolean(id));
-  const deals = await searchTeamDeals(token, bdrIds);
+  // Fetch the team's deals and the Corgi quote index side by side. If Corgi is
+  // unavailable, getCorgiIndex() returns an empty map and deals still load.
+  const [deals, corgi] = await Promise.all([
+    searchTeamDeals(token, bdrIds),
+    getCorgiIndex(),
+  ]);
   return deals
-    .map((d) => mapDeal(d, id2name))
+    .map((d) => mapDeal(d, id2name, corgi))
     .filter((x): x is Prospect => x !== null);
 }
 
