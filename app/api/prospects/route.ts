@@ -271,15 +271,48 @@ function moreReal(a: Prospect, b: Prospect): boolean {
   return false;
 }
 
-// Keep one deal per company name — the most real one.
+// An empty "shell" deal: no confirmed money, no Corgi quote, not won, and a
+// zero amount. These are the throwaway duplicates HubSpot leaves behind — safe
+// to drop when a real deal exists for the same company. A deal that is ANY of
+// won / quoted / has-an-amount is "real" and is NEVER dropped, so no genuine
+// Closed Won (or other real deal) can ever go missing.
+function isShell(p: Prospect): boolean {
+  return (
+    !p.confirmed &&
+    !p.hasCorgiQuote &&
+    p.stage !== "Closed Won" &&
+    (p.quote || 0) === 0
+  );
+}
+
+// Collapse duplicate company rows. Within each company we keep every REAL deal
+// (so two genuine wins both survive) and throw away only the empty shells. If a
+// company somehow has nothing but shells, we keep the single most-real one so
+// the company still shows up once.
 function dedupeByCompany(rows: Prospect[]): Prospect[] {
-  const best = new Map<string, Prospect>();
+  const groups = new Map<string, Prospect[]>();
   for (const r of rows) {
     const key = r.company.trim().toLowerCase();
-    const prev = best.get(key);
-    if (!prev || moreReal(r, prev)) best.set(key, r);
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
   }
-  return [...best.values()];
+
+  const out: Prospect[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    const real = group.filter((r) => !isShell(r));
+    if (real.length > 0) {
+      out.push(...real); // keep all genuine deals, drop the shells
+    } else {
+      // all shells → keep just the most-real of them so the company still shows
+      out.push([...group].sort((a, b) => (moreReal(a, b) ? -1 : 1))[0]);
+    }
+  }
+  return out;
 }
 
 // In-memory cache shared across requests on the same server instance. Holds the
