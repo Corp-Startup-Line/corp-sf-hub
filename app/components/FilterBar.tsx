@@ -1,6 +1,6 @@
 "use client";
 
-import { MONTHS, type Filters } from "../lib/data";
+import { type Filters } from "../lib/data";
 import { prettyMonth } from "../lib/month";
 
 // One labelled dropdown. `value` is the current choice, `onChange` reports
@@ -40,14 +40,16 @@ export default function FilterBar({
   filters,
   setFilters,
   bdrs,
+  months,
 }: {
   filters: Filters;
   setFilters: (f: Filters) => void;
   bdrs: string[];
+  months: string[];
 }) {
   const monthOptions = [
     { value: "all", label: "All Time" },
-    ...MONTHS.map((m) => ({ value: m, label: prettyMonth(m) })),
+    ...months.map((m) => ({ value: m, label: prettyMonth(m) })),
   ];
   const bdrOptions = [
     { value: "all", label: "All BDRs" },

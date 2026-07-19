@@ -233,6 +233,55 @@ function mapDeal(
   };
 }
 
+// ----------------------------------------------------------------------------
+// De-duplicating deals. HubSpot often holds the same company twice: one real
+// deal plus an empty "shell" (amount 0, still sitting in an early stage). Left
+// alone they show up as two rows and inflate the funnel counts. We collapse
+// every company down to ONE deal — keeping whichever is "most real".
+// ----------------------------------------------------------------------------
+
+// How advanced each stage is (higher = further along, so more "real").
+const STAGE_PRIORITY: Record<Stage, number> = {
+  "Closed Won": 5,
+  Quoted: 4,
+  Qualified: 3,
+  "Meeting Booked": 2,
+  Ghosting: 1,
+  "Closed Lost": 0,
+};
+
+// A ranked "realness" fingerprint for a deal, compared field-by-field:
+// confirmed money first, then having a real Corgi quote, then how far along the
+// stage is, then the deal amount. Bigger wins on the first field that differs.
+function realness(p: Prospect): number[] {
+  return [
+    p.confirmed ? 1 : 0,
+    p.hasCorgiQuote ? 1 : 0,
+    STAGE_PRIORITY[p.stage] ?? 0,
+    p.quote || 0,
+  ];
+}
+
+function moreReal(a: Prospect, b: Prospect): boolean {
+  const ra = realness(a);
+  const rb = realness(b);
+  for (let i = 0; i < ra.length; i++) {
+    if (ra[i] !== rb[i]) return ra[i] > rb[i];
+  }
+  return false;
+}
+
+// Keep one deal per company name — the most real one.
+function dedupeByCompany(rows: Prospect[]): Prospect[] {
+  const best = new Map<string, Prospect>();
+  for (const r of rows) {
+    const key = r.company.trim().toLowerCase();
+    const prev = best.get(key);
+    if (!prev || moreReal(r, prev)) best.set(key, r);
+  }
+  return [...best.values()];
+}
+
 // In-memory cache shared across requests on the same server instance. Holds the
 // last successful result so repeat visits within CACHE_TTL_MS skip HubSpot.
 let cache: { at: number; data: Prospect[] } | null = null;
@@ -252,9 +301,11 @@ async function loadProspects(token: string): Promise<Prospect[]> {
     searchTeamDeals(token, bdrIds),
     getCorgiIndex(),
   ]);
-  return deals
+  const mapped = deals
     .map((d) => mapDeal(d, id2name, corgi))
     .filter((x): x is Prospect => x !== null);
+  // Collapse duplicate company rows down to one deal each.
+  return dedupeByCompany(mapped);
 }
 
 export async function GET() {

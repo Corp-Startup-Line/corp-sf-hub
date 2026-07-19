@@ -100,9 +100,11 @@ export const TODAY = "2026-06-18";
 export const STALE_DAYS = 4;
 export const WARN_DAYS = 3;
 
-// Where a deal lives in HubSpot. The sample uses a per-deal placeholder link;
-// swap this (or add a real `hubspotUrl` per deal) when you connect HubSpot.
-export const HUBSPOT_BASE = "https://app.hubspot.com/contacts/deal/";
+// Where a deal lives in HubSpot. This is the exact record-page format for our
+// portal (244821378) on the na2 data centre, so clicking a company name opens
+// that deal's real HubSpot record. `0-3` is HubSpot's internal code for "deal".
+export const HUBSPOT_BASE =
+  "https://app-na2.hubspot.com/contacts/244821378/record/0-3/";
 
 // ---- The shape of a single deal/prospect ---------------------------------
 export type Prospect = {
@@ -125,11 +127,28 @@ export type Prospect = {
   corgiPremium?: number;       // annual premium (USD) from the matched quote
 };
 
-// A deal counts as "Quoted" when Corgi/Django actually has a quote for it. The
-// sample rows below have no Corgi data, so they fall back to the HubSpot stage
-// and the demo funnel still works.
+// Stages that are a FINAL outcome. Once a deal is won or dead, a Corgi quote
+// existing on it doesn't drag it back into the "Quoted" bucket.
+const TERMINAL_STAGES: Stage[] = ["Closed Won", "Ghosting", "Closed Lost"];
+
+// The ONE source of truth for which stage a deal counts as. A live deal that
+// Corgi/Django actually has a quote for is shown and counted as "Quoted", no
+// matter what loose stage HubSpot left it in (e.g. still "Meeting Booked").
+// Because the funnel count, the click-through list, and the stage badge all
+// call this same function, the "Quoted" card and the deals it opens always
+// match — and clicking it can never surface a Meeting-Booked or Closed-Won row.
+// Sample rows have no Corgi data (hasCorgiQuote is undefined), so they simply
+// keep their own HubSpot stage and the demo still works.
+export function effectiveStage(p: Prospect): Stage {
+  if (TERMINAL_STAGES.includes(p.stage)) return p.stage;
+  if (p.hasCorgiQuote) return "Quoted";
+  return p.stage;
+}
+
+// A deal counts as "Quoted" only when its effective stage is Quoted (i.e. it
+// has a real Corgi/Django quote and hasn't already been won or lost).
 export function isQuoted(p: Prospect): boolean {
-  return p.hasCorgiQuote ?? p.stage === "Quoted";
+  return effectiveStage(p) === "Quoted";
 }
 
 // ---------------------------------------------------------------------------
@@ -230,15 +249,18 @@ export type FunnelStage = {
 // right now, so a card's number matches the rows shown when you click it.
 export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   const total = rows.length || 1; // avoid divide-by-zero
+  // Count by EFFECTIVE stage (Corgi-quote aware) for every card, so no deal is
+  // ever counted twice — e.g. a Corgi-quoted deal counts as Quoted only, not
+  // also as Qualified — and each card's number matches the rows it opens.
   const inStage = (stage: Stage) =>
-    rows.filter((r) => r.stage === stage).length;
+    rows.filter((r) => effectiveStage(r) === stage).length;
 
   // Every deal is at least a booked meeting, so a "Meetings Booked" card would
   // just repeat "Total Deals" — it's deliberately left out of the funnel.
   const totalDeals = rows.length;
   const qualified = inStage("Qualified");
   // "Quoted" is driven by real Corgi/Django quotes, not the HubSpot stage.
-  const quoted = rows.filter(isQuoted).length;
+  const quoted = inStage("Quoted");
   const won = inStage("Closed Won");
   const ghosting = inStage("Ghosting");
   const lost = inStage("Closed Lost");
@@ -264,15 +286,13 @@ export type DealValues = {
 
 export function computeDealValues(rows: Prospect[]): DealValues {
   const openStages: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
-  const pipeline = sum(rows.filter((r) => openStages.includes(r.stage)), "quote");
+  const pipeline = sumValue(rows.filter((r) => openStages.includes(r.stage)));
   const wonRows = rows.filter((r) => r.stage === "Closed Won");
-  const won = sum(wonRows, "quote");
+  const won = sumValue(wonRows);
   const avgDeal = wonRows.length ? Math.round(won / wonRows.length) : 0;
   // Confirmed revenue = real premiums from purchased Corgi quotes. Sample rows
   // have no premium, so they fall back to the deal amount for the demo.
-  const confirmed = rows
-    .filter((r) => r.confirmed)
-    .reduce((acc, r) => acc + (r.corgiPremium || r.quote), 0);
+  const confirmed = sumValue(rows.filter((r) => r.confirmed));
   return { pipeline, won, avgDeal, confirmed };
 }
 
@@ -287,7 +307,7 @@ export type QuotaProgress = {
 export function computeQuota(rows: Prospect[], f: Filters): QuotaProgress {
   const singleBdr = f.bdr !== "all";
   const target = singleBdr ? QUOTA.bdrMonthly : QUOTA.teamMonthly;
-  const won = sum(rows.filter((r) => r.stage === "Closed Won"), "quote");
+  const won = sumValue(rows.filter((r) => r.stage === "Closed Won"));
   const pct = Math.round((won / target) * 100);
   return { target, won, pct };
 }
@@ -321,7 +341,7 @@ export function computeRepStats(
   return names.map((name) => {
     const mine = rows.filter((r) => (team === "bdr" ? r.bdr : r.ae) === name);
     const wonRows = mine.filter((r) => r.stage === "Closed Won");
-    const wonValue = sum(wonRows, "quote");
+    const wonValue = sumValue(wonRows);
     return {
       name,
       prospects: mine.length,
@@ -363,10 +383,22 @@ export function computeKpis(rows: Prospect[]): Kpis {
 export type MonthPoint = { month: string; wonValue: number; wonCount: number };
 
 export function computeMonthlyTrend(rows: Prospect[]): MonthPoint[] {
-  return MONTHS.map((m) => {
+  // Build the month axis from the deals actually in view (so July, August, etc.
+  // appear automatically as soon as there are deals in them) instead of a
+  // hardcoded list that silently dropped anything past June.
+  return monthsFromRows(rows).map((m) => {
     const won = rows.filter((r) => r.month === m && r.stage === "Closed Won");
-    return { month: m, wonValue: sum(won, "quote"), wonCount: won.length };
+    return { month: m, wonValue: sumValue(won), wonCount: won.length };
   });
+}
+
+// The distinct months present in a set of deals, oldest first (e.g.
+// ["2026-05", "2026-06", "2026-07"]). Used to build the month dropdown and the
+// trend chart from real data rather than a fixed list.
+export function monthsFromRows(rows: Prospect[]): string[] {
+  return Array.from(
+    new Set(rows.map((r) => r.month).filter((m): m is string => Boolean(m))),
+  ).sort();
 }
 
 // ---- Automated insights (the text callouts that update with filters) ------
@@ -480,4 +512,18 @@ export function hubspotUrl(p: Prospect): string {
 // Small helper: add up one number field across a list of rows.
 function sum(rows: Prospect[], key: "quote"): number {
   return rows.reduce((acc, r) => acc + r[key], 0);
+}
+
+// The dollar value we credit to a single deal. Prefer the REAL Corgi/Django
+// annual premium when we have one (that's the actual money), otherwise fall
+// back to the HubSpot deal amount. This keeps every revenue figure on the
+// dashboard — per-BDR, per-AE, leaderboard, trend, confirmed — on the same
+// accurate basis.
+export function dealValue(p: Prospect): number {
+  return p.corgiPremium || p.quote;
+}
+
+// Add up dealValue across a list of rows.
+function sumValue(rows: Prospect[]): number {
+  return rows.reduce((acc, r) => acc + dealValue(r), 0);
 }

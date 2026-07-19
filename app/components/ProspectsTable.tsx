@@ -6,7 +6,7 @@ import {
   dealHealth,
   daysSinceContact,
   hubspotUrl,
-  isQuoted,
+  effectiveStage,
   type DealHealth,
   type Prospect,
   type Stage,
@@ -112,15 +112,13 @@ export default function ProspectsTable({
 
   // Filter (stage + won-only + search), then sort. useMemo = only recompute when inputs change.
   const processed = useMemo(() => {
-    // Match the exact stage picked (not cumulative) — the table shows only
-    // deals sitting in that stage right now. "Quoted" is special: it means
-    // "has a real Corgi/Django quote", so it matches the funnel's Quoted card.
+    // Match by EFFECTIVE stage — the same Corgi-quote-aware definition the
+    // funnel cards use — so clicking any card (including "Quoted") shows exactly
+    // the deals that card counted, and never a Meeting-Booked/Closed-Won stray.
     let out =
       stageFilter === "all"
         ? rows
-        : stageFilter === "Quoted"
-          ? rows.filter(isQuoted)
-          : rows.filter((r) => r.stage === stageFilter);
+        : rows.filter((r) => effectiveStage(r) === stageFilter);
     if (wonOnly) out = out.filter((r) => r.stage === "Closed Won");
 
     const q = search.trim().toLowerCase();
@@ -247,7 +245,7 @@ export default function ProspectsTable({
                   </a>
                 </td>
                 <td className="px-4 py-3">
-                  <StageBadge stage={r.stage} />
+                  <StageBadge stage={effectiveStage(r)} />
                 </td>
                 <td className="px-4 py-3">{r.bdr}</td>
                 <td className="px-4 py-3">{r.ae}</td>

@@ -38,13 +38,20 @@ export default function Dashboard() {
   const [allRows, setAllRows] = useState<Prospect[]>([]);
   useEffect(() => {
     let alive = true;
-    getProspects().then((data) => {
-      if (!alive) return;
-      setAllRows(data);
-      setLoading(false);
-    });
+    // Pull the latest deals now, then quietly re-pull every 3 minutes so the
+    // numbers stay fresh without anyone reloading the page. The re-pulls run in
+    // the background (no loading skeleton) so the dashboard never flickers.
+    const load = () =>
+      getProspects().then((data) => {
+        if (!alive) return;
+        setAllRows(data);
+        setLoading(false);
+      });
+    load();
+    const id = setInterval(load, 3 * 60 * 1000);
     return () => {
       alive = false;
+      clearInterval(id);
     };
   }, []);
 
@@ -55,6 +62,16 @@ export default function Dashboard() {
       Array.from(
         new Set(allRows.map((r) => r.bdr).filter((b) => b && b !== "Unassigned")),
       ).sort(),
+    [allRows],
+  );
+
+  // The month dropdown is built from the months that actually have deals, so
+  // new months (July, August, …) appear on their own — nothing is hardcoded.
+  const dataMonths = useMemo(
+    () =>
+      Array.from(
+        new Set(allRows.map((r) => r.month).filter(Boolean)),
+      ).sort() as string[],
     [allRows],
   );
 
@@ -137,7 +154,7 @@ export default function Dashboard() {
       <div className="mb-3 flex justify-end">
         <ManageBdrs bdrs={bdrs} onChange={updateBdrs} />
       </div>
-      <FilterBar filters={filters} setFilters={setFilters} bdrs={bdrs} />
+      <FilterBar filters={filters} setFilters={setFilters} bdrs={bdrs} months={dataMonths} />
 
       {loading ? (
         <LoadingState />
