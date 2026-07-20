@@ -120,33 +120,35 @@ export type Prospect = {
   month: string;               // e.g. "2026-03"
   confirmed: boolean;          // Corgi quote was purchased (real confirmed revenue)
   lastContact: string | null;  // ISO date of the last positive contact (null = never)
+  // ---- Real HubSpot engagement dates (attached by the server route) ----------
+  // Undefined on the sample rows below; set for every live deal.
+  lastInbound?: string | null;     // last time the CUSTOMER reached in (inbound call / incoming email)
+  lastBdrOutbound?: string | null; // last outbound CALL a BDR made (emails omitted — owner unreliable)
   // ---- Real Corgi/Django quote data (attached by the server route) ---------
   // Left undefined on the sample rows below; set for every live deal.
   hasCorgiQuote?: boolean;     // a matching quote exists in Corgi/Django
   corgiStatus?: string | null; // e.g. "purchased", "quoted"
-  corgiPremium?: number;       // annual premium (USD) from the matched quote
+  corgiPremium?: number;       // summed premium (USD) of this deal's purchased policies
+  corgiQuotedPremium?: number; // largest amount quoted (not yet sold) — for display only, never revenue
+  corgiRevenueResolved?: boolean; // Corgi owns this deal's value (don't fall back to HubSpot)
 };
 
-// Stages that are a FINAL outcome. Once a deal is won or dead, a Corgi quote
-// existing on it doesn't drag it back into the "Quoted" bucket.
-const TERMINAL_STAGES: Stage[] = ["Closed Won", "Ghosting", "Closed Lost"];
-
-// The ONE source of truth for which stage a deal counts as. A live deal that
-// Corgi/Django actually has a quote for is shown and counted as "Quoted", no
-// matter what loose stage HubSpot left it in (e.g. still "Meeting Booked").
-// Because the funnel count, the click-through list, and the stage badge all
-// call this same function, the "Quoted" card and the deals it opens always
-// match — and clicking it can never surface a Meeting-Booked or Closed-Won row.
-// Sample rows have no Corgi data (hasCorgiQuote is undefined), so they simply
-// keep their own HubSpot stage and the demo still works.
+// The ONE source of truth for which stage a deal counts as — its HubSpot stage,
+// full stop. HubSpot is authoritative for the pipeline: "Quoted" means the deal
+// sits in HubSpot's Quoted (or Contract Sent) stage, i.e. a quote was actually
+// sent on HubSpot — NOT merely that Corgi/Django has a quote for the company.
+// "Discovery" is HubSpot's "qualifiedtobuy" (meeting set + post-meeting
+// activity), mapped to our "Qualified". Because the funnel count, the
+// click-through list, and the stage badge all call this same function, every
+// stage filter is strict: clicking a card shows exactly the deals that card
+// counted, and a deal lives in one stage only.
 export function effectiveStage(p: Prospect): Stage {
-  if (TERMINAL_STAGES.includes(p.stage)) return p.stage;
-  if (p.hasCorgiQuote) return "Quoted";
   return p.stage;
 }
 
-// A deal counts as "Quoted" only when its effective stage is Quoted (i.e. it
-// has a real Corgi/Django quote and hasn't already been won or lost).
+// A deal counts as "Quoted" only when its HubSpot stage is Quoted (a quote was
+// sent on HubSpot). Corgi/Django having a quote for the company does NOT move a
+// deal into this bucket — HubSpot owns the pipeline stage.
 export function isQuoted(p: Prospect): boolean {
   return effectiveStage(p) === "Quoted";
 }
@@ -249,9 +251,8 @@ export type FunnelStage = {
 // right now, so a card's number matches the rows shown when you click it.
 export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   const total = rows.length || 1; // avoid divide-by-zero
-  // Count by EFFECTIVE stage (Corgi-quote aware) for every card, so no deal is
-  // ever counted twice — e.g. a Corgi-quoted deal counts as Quoted only, not
-  // also as Qualified — and each card's number matches the rows it opens.
+  // Count by HubSpot stage for every card, so each deal sits in exactly one
+  // stage and each card's number matches the (strictly filtered) rows it opens.
   const inStage = (stage: Stage) =>
     rows.filter((r) => effectiveStage(r) === stage).length;
 
@@ -259,7 +260,7 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   // just repeat "Total Deals" — it's deliberately left out of the funnel.
   const totalDeals = rows.length;
   const qualified = inStage("Qualified");
-  // "Quoted" is driven by real Corgi/Django quotes, not the HubSpot stage.
+  // "Quoted" = deals sitting in HubSpot's Quoted / Contract Sent stage.
   const quoted = inStage("Quoted");
   const won = inStage("Closed Won");
   const ghosting = inStage("Ghosting");
@@ -514,13 +515,21 @@ function sum(rows: Prospect[], key: "quote"): number {
   return rows.reduce((acc, r) => acc + r[key], 0);
 }
 
-// The dollar value we credit to a single deal. Prefer the REAL Corgi/Django
-// annual premium when we have one (that's the actual money), otherwise fall
-// back to the HubSpot deal amount. This keeps every revenue figure on the
-// dashboard — per-BDR, per-AE, leaderboard, trend, confirmed — on the same
-// accurate basis.
+// The dollar value we credit to a single deal. Corgi/Django is the source of
+// truth for money: when Corgi has purchased-policy revenue for this deal's
+// company, that premium is authoritative (`corgiRevenueResolved`) — even a $0
+// there means "no bought policy on this deal", not "guess from HubSpot". Only
+// when Corgi has no purchased policy for the company do we fall back to the
+// HubSpot deal amount. This keeps every revenue figure on the dashboard —
+// per-BDR, per-AE, leaderboard, trend, confirmed — on the same Corgi basis.
 export function dealValue(p: Prospect): number {
-  return p.corgiPremium || p.quote;
+  // Closed/Corgi-owned deal → the confirmed purchased premium (0 = no policy).
+  if (p.corgiRevenueResolved) return p.corgiPremium || 0;
+  // Open deal → its pipeline value: the Corgi QUOTED premium (what we quoted the
+  // customer) is the source of truth, falling back to the HubSpot amount only
+  // when Corgi has no quote. This feeds the Pipeline KPI and the deal finder's
+  // Quote column alike, so pipeline math is on the same Corgi basis as revenue.
+  return p.corgiPremium || p.corgiQuotedPremium || p.quote || 0;
 }
 
 // Add up dealValue across a list of rows.

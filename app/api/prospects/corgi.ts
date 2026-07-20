@@ -16,16 +16,26 @@ const MAX_QUOTES = 40_000; // safety cap so we can never loop forever
 const CONCURRENCY = 8; // parallel page fetches (Corgi throttles above this)
 const CACHE_TTL_MS = 10 * 60 * 1000; // reuse the pulled quotes for 10 minutes
 
-// What we keep about the best quote we found for one company.
-export type CorgiMatch = {
-  status: string | null; // e.g. "purchased", "quoted"
-  premium: number; // annual premium in USD
-  purchased: boolean; // true once the quote turned into a bought policy
+// Everything we keep about ONE company's quotes in Corgi/Django. A company can
+// buy several policies (e.g. cyber + tech E&O), so we keep the FULL list of
+// purchased premiums — not just the biggest one — and their running total.
+// `purchasedSum` is the company's real confirmed revenue; `purchasedPremiums`
+// lets the deals route spread those policies across a company's HubSpot deals
+// so no single policy is ever counted twice.
+export type CorgiCompany = {
+  purchasedPremiums: number[]; // each purchased policy's annual premium (USD)
+  purchasedSum: number; // sum of the above = confirmed revenue for the company
+  quotedPremium: number; // largest annual premium among NON-purchased quotes —
+  // i.e. what we quoted but haven't sold yet. Shown in the deal finder's Quote
+  // column so open deals display their quoted figure; NEVER counted as revenue.
+  hasQuote: boolean; // a quote exists at all (any status)
+  hasPurchased: boolean; // at least one quote turned into a bought policy
+  status: string | null; // a representative status ("purchased" once bought)
 };
 
 // Strip the noise so "Acme, Inc." and "Acme Inc" match: lower-case, drop
 // punctuation and common company suffixes, then collapse the spaces.
-function normalizeCompany(name: string): string {
+export function normalizeCompany(name: string): string {
   return name
     .toLowerCase()
     .replace(/&/g, " and ")
@@ -114,43 +124,146 @@ async function fetchAllQuotes(token: string): Promise<any[]> {
   return out;
 }
 
-// Build the company → best-quote lookup. When a company has several quotes, a
-// purchased one wins (that's confirmed revenue); otherwise the higher premium.
-export function indexByCompany(quotes: any[]): Map<string, CorgiMatch> {
-  const map = new Map<string, CorgiMatch>();
+// Round a dollar amount to whole cents (avoids 4584.6199999 float noise).
+function toCents(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// One purchased quote reduced to the two fields that tell policies apart:
+// its annual premium and its coverage type ("directors-and-officers", etc.).
+type PurchasedItem = { premium: number; coverage: string | null };
+
+// How close two premiums must be (as a fraction) to count as "the same money".
+// 5% comfortably catches a re-quote that drifted a couple of percent (Blue Ocean:
+// $102,011 vs $104,370 ≈ 2.3%) without merging genuinely different policies.
+const DUP_PREMIUM_TOLERANCE = 0.05;
+
+// True when two premiums are within the tolerance of each other (0 vs 0 counts).
+function premiumsClose(a: number, b: number): boolean {
+  const m = Math.max(Math.abs(a), Math.abs(b));
+  if (m === 0) return true;
+  return Math.abs(a - b) / m <= DUP_PREMIUM_TOLERANCE;
+}
+
+// Collapse a company's PURCHASED quotes down to its real, distinct policies —
+// summing genuine bundles (a customer who bought D&O + cyber + tech-E&O keeps
+// all three) while dropping duplicate/revised quotes for the SAME policy that
+// Django sometimes leaves marked "purchased". The discriminator learned from the
+// data is COVERAGE:
+//   • Two quotes with the same non-null coverage are a revision of one policy —
+//     keep the larger, never both (e.g. two D&O quotes).
+//   • Two quotes with different non-null coverages are distinct policies — sum.
+//   • A null-coverage quote (Django sometimes omits it) can't be told apart by
+//     type, so it's judged a duplicate only when its premium is within 5% of a
+//     policy we're already keeping (Blue Ocean's null $104,370 next to its D&O
+//     $102,011); otherwise it stands as its own policy. Premium is NEVER used to
+//     merge two known-different coverages, so near-priced distinct policies
+//     (Avono's D&O $7,082 and tech-E&O $7,171) both survive.
+// Returns the kept premiums (each a distinct policy), largest first.
+export function dedupePurchased(items: PurchasedItem[]): number[] {
+  // Start with the non-null coverages: one entry per coverage type, largest
+  // premium wins (a same-coverage re-quote collapses into it).
+  const byCoverage = new Map<string, number>();
+  const nulls: number[] = [];
+  for (const it of items) {
+    if (it.premium <= 0) continue; // a $0 "purchased" quote adds no revenue
+    if (it.coverage) {
+      const prev = byCoverage.get(it.coverage) ?? 0;
+      if (it.premium > prev) byCoverage.set(it.coverage, it.premium);
+    } else {
+      nulls.push(it.premium);
+    }
+  }
+
+  const kept = [...byCoverage.values()];
+  // Fold each null-coverage quote (largest first) into the nearest kept policy
+  // when their premiums match; otherwise it's a genuinely separate policy.
+  for (const prem of nulls.sort((a, b) => b - a)) {
+    let bestIdx = -1;
+    let bestDiff = Infinity;
+    for (let i = 0; i < kept.length; i++) {
+      if (!premiumsClose(prem, kept[i])) continue;
+      const diff = Math.abs(prem - kept[i]);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx === -1) kept.push(prem); // no match → its own policy
+    else if (prem > kept[bestIdx]) kept[bestIdx] = prem; // duplicate → keep larger
+  }
+  return kept.map(toCents).sort((a, b) => b - a);
+}
+
+// Build the company → all-its-quotes lookup. A company's PURCHASED quotes are
+// buffered with their coverage, then de-duplicated (see dedupePurchased) so a
+// customer's genuinely distinct policies are summed while revised/duplicate
+// quotes for one policy are collapsed. Merely quoted / draft records still flag
+// "this company has a quote" but don't add to confirmed revenue.
+export function indexByCompany(quotes: any[]): Map<string, CorgiCompany> {
+  const map = new Map<string, CorgiCompany>();
+  // Buffer of each company's purchased quotes (premium + coverage), de-duped
+  // after the full pass so same-policy revisions across pages collapse together.
+  const purchasedByKey = new Map<string, PurchasedItem[]>();
+
   for (const q of quotes) {
     const company =
       typeof q?.entity_legal_name === "string" ? q.entity_legal_name : "";
     const key = normalizeCompany(company);
     if (!key) continue;
     const status: string | null = q?.status ?? null;
-    const match: CorgiMatch = {
-      status,
-      premium: Math.round(Number(q?.annual_premium) || 0),
-      purchased: isPurchased(status),
-    };
-    const prev = map.get(key);
-    if (!prev) {
-      map.set(key, match);
-      continue;
+    const premium = toCents(Number(q?.annual_premium) || 0);
+    const coverage: string | null =
+      typeof q?.coverage === "string" ? q.coverage : null;
+
+    let e = map.get(key);
+    if (!e) {
+      e = {
+        purchasedPremiums: [],
+        purchasedSum: 0,
+        quotedPremium: 0,
+        hasQuote: false,
+        hasPurchased: false,
+        status: null,
+      };
+      map.set(key, e);
     }
-    const better =
-      (match.purchased && !prev.purchased) ||
-      (match.purchased === prev.purchased && match.premium > prev.premium);
-    if (better) map.set(key, match);
+    e.hasQuote = true;
+    if (isPurchased(status)) {
+      e.hasPurchased = true;
+      e.status = "purchased";
+      const buf = purchasedByKey.get(key);
+      if (buf) buf.push({ premium, coverage });
+      else purchasedByKey.set(key, [{ premium, coverage }]);
+    } else {
+      if (!e.status) e.status = status; // keep the first non-purchased status
+      // Remember the largest amount we quoted this company (not yet sold), so
+      // the deal finder can show a real quote figure instead of $0.
+      if (premium > e.quotedPremium) e.quotedPremium = premium;
+    }
+  }
+
+  // De-dupe each company's purchased quotes into its distinct policies, then
+  // record them and their true confirmed-revenue total.
+  for (const [key, items] of purchasedByKey) {
+    const e = map.get(key)!;
+    e.purchasedPremiums = dedupePurchased(items);
+    e.purchasedSum = toCents(
+      e.purchasedPremiums.reduce((sum, p) => sum + p, 0),
+    );
   }
   return map;
 }
 
 // In-memory index shared across requests on this server instance, plus a
 // single in-flight promise so concurrent requests share one pull.
-let cache: { at: number; index: Map<string, CorgiMatch> } | null = null;
-let inFlight: Promise<Map<string, CorgiMatch> | null> | null = null;
+let cache: { at: number; index: Map<string, CorgiCompany> } | null = null;
+let inFlight: Promise<Map<string, CorgiCompany> | null> | null = null;
 
 // Pull (or reuse) the quote index. Returns null when there's no key or the
 // pull failed, so the caller can fall back to HubSpot stages instead of
 // treating every deal as un-quoted. A successful pull is a (non-empty) Map.
-export async function getCorgiIndex(): Promise<Map<string, CorgiMatch> | null> {
+export async function getCorgiIndex(): Promise<Map<string, CorgiCompany> | null> {
   const token = process.env.CORGI_PARTNER_TOKEN;
   if (!token) return null;
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.index;
@@ -172,11 +285,11 @@ export async function getCorgiIndex(): Promise<Map<string, CorgiMatch> | null> {
   return inFlight;
 }
 
-// Find the quote for one company name (null when there's no match).
+// Find a company's Corgi record by name (null when there's no match).
 export function matchCompany(
-  index: Map<string, CorgiMatch>,
+  index: Map<string, CorgiCompany>,
   company: string,
-): CorgiMatch | null {
+): CorgiCompany | null {
   const key = normalizeCompany(company);
   if (!key) return null;
   return index.get(key) ?? null;

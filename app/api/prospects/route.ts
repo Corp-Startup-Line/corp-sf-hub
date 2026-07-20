@@ -10,7 +10,13 @@
 // ============================================================================
 
 import type { Prospect, Stage } from "../../lib/data";
-import { getCorgiIndex, matchCompany, type CorgiMatch } from "./corgi";
+import {
+  getCorgiIndex,
+  matchCompany,
+  normalizeCompany,
+  type CorgiCompany,
+} from "./corgi";
+import { enrichEngagements, type Engagement } from "./engagements";
 
 // Always run fresh on each request (read the live key + live deals), never
 // cached at build time.
@@ -183,7 +189,7 @@ function toDate(iso: string | null | undefined): string | null {
 function mapDeal(
   d: HubSpotDeal,
   id2name: Map<string, string>,
-  corgi: Map<string, CorgiMatch> | null,
+  corgi: Map<string, CorgiCompany> | null,
 ): Prospect | null {
   const p = d.properties;
   const stage = STAGE_BY_HUBSPOT[p.dealstage ?? ""];
@@ -204,10 +210,10 @@ function mapDeal(
   const company = (p.dealname ?? "Untitled")
     .replace(/\s*-\s*New Deal\s*$/i, "")
     .trim();
-  // Attach the real Corgi/Django quote for THIS company, if one exists. When
-  // the Corgi index is unavailable (null), leave the quote fields undefined so
-  // the dashboard falls back to the HubSpot stage instead of showing zeroes.
-  const quote = corgi ? matchCompany(corgi, company) : null;
+  // Look up THIS company's Corgi/Django record (all its quotes). When the Corgi
+  // index is unavailable (null), leave the quote fields undefined so the
+  // dashboard falls back to the HubSpot deal amount instead of showing zeroes.
+  const c = corgi ? matchCompany(corgi, company) : null;
   const base: Prospect = {
     id: Number(d.id),
     company,
@@ -224,13 +230,115 @@ function mapDeal(
   };
   if (!corgi) return base; // Corgi unavailable → stage-based fallback only
 
+  // The actual premium is filled in AFTER de-duping (distributeCorgiRevenue),
+  // because a company's purchased policies are spread across its surviving deals
+  // there — doing it per-deal here would copy one company's total onto each of
+  // its deals and double-count. corgiRevenueResolved marks deals whose value
+  // Corgi owns (so a $0 there means "no policy", not "fall back to HubSpot").
   return {
     ...base,
-    confirmed: quote?.purchased ?? false, // real: the Corgi quote was bought
-    hasCorgiQuote: quote !== null, // real: Corgi/Django has a quote for it
-    corgiStatus: quote?.status ?? null,
-    corgiPremium: quote?.premium ?? 0,
+    confirmed: c?.hasPurchased ?? false, // refined per-deal after distribution
+    hasCorgiQuote: c?.hasQuote ?? false, // Corgi/Django has a quote for it
+    corgiStatus: c?.status ?? null,
+    corgiPremium: 0,
+    corgiQuotedPremium: c?.quotedPremium ?? 0, // amount quoted (not yet sold)
+    corgiRevenueResolved: false,
   };
+}
+
+// Manual ownership calls for genuine data ties. When one Corgi policy could
+// belong to either of two IDENTICAL Closed Won deals (same company, same
+// amount) owned by different BDRs, nothing in HubSpot or Corgi can tell them
+// apart, so the nearest-amount match is a coin-flip. These overrides record who
+// the policy actually belongs to. Keyed by normalised company name → the BDR's
+// full HubSpot name. Mainstay Digital: confirmed by Carwyn as his deal.
+const OWNERSHIP_OVERRIDES: Record<string, string> = {
+  [normalizeCompany("Mainstay Digital")]: "Carwyn Chiramel",
+};
+
+// ----------------------------------------------------------------------------
+// Spread each company's PURCHASED Corgi policies across its (de-duped) HubSpot
+// deals. One deal + one company total is the common case. When a company has
+// several deals (e.g. AdvisorGenie's two policies), each policy is credited to
+// the deal whose HubSpot amount is closest to it — so the company total is
+// preserved exactly and no policy is ever counted on two deals. Deals in a
+// Corgi-covered company that receive no policy show $0 (Corgi is authoritative);
+// companies with no purchased policy are left for the HubSpot-amount fallback.
+// ----------------------------------------------------------------------------
+function distributeCorgiRevenue(
+  rows: Prospect[],
+  corgi: Map<string, CorgiCompany> | null,
+): Prospect[] {
+  if (!corgi) return rows;
+
+  const groups = new Map<string, Prospect[]>();
+  for (const r of rows) {
+    const key = normalizeCompany(r.company);
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+
+  for (const [key, deals] of groups) {
+    const c = corgi.get(key);
+    if (!c || c.purchasedPremiums.length === 0) continue; // HubSpot fallback
+
+    // A purchased policy is confirmed (won) money, so Corgi owns EVERY one of
+    // this company's Closed Won deals (open/ghosted deals keep their HubSpot
+    // pipeline amount). Mark them all resolved with $0 up front; the ones that
+    // draw a policy below get their premium, and the rest stay at $0 rather than
+    // falling back to the HubSpot amount (which would double-count the policy).
+    const wonDeals = deals.filter((d) => d.stage === "Closed Won");
+    const owned = wonDeals.length ? wonDeals : deals;
+    for (const d of owned) {
+      d.corgiPremium = 0;
+      d.confirmed = false;
+      d.corgiRevenueResolved = true;
+    }
+
+    // Which owned deals actually RECEIVE the premiums. A manual ownership call
+    // (e.g. Mainstay Digital) pins a genuine tie to one rep so the policy lands
+    // on the right BDR instead of whichever identical deal sorted first;
+    // otherwise every owned deal competes for the nearest-amount match.
+    let candidates = owned;
+    const owner = OWNERSHIP_OVERRIDES[key];
+    if (owner) {
+      const pinned = owned.filter((d) => d.bdr === owner);
+      if (pinned.length) candidates = pinned;
+    }
+
+    if (candidates.length === 1) {
+      candidates[0].corgiPremium = c.purchasedSum;
+      candidates[0].confirmed = true;
+      candidates[0].corgiRevenueResolved = true;
+      continue;
+    }
+
+    // Several won deals for one company: give each policy to the won deal whose
+    // HubSpot amount is nearest, biggest policies first. The company total is
+    // preserved and no policy is counted twice; a won deal that draws no policy
+    // shows $0 (Corgi says there's no separate bought policy behind it).
+    const premiums = [...c.purchasedPremiums].sort((a, b) => b - a);
+    const totals = new Map<number, number>(candidates.map((d) => [d.id, 0]));
+    for (const prem of premiums) {
+      let best = candidates[0];
+      let bestDiff = Infinity;
+      for (const d of candidates) {
+        const diff = Math.abs((d.quote || 0) - prem);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = d;
+        }
+      }
+      totals.set(best.id, Math.round((totals.get(best.id)! + prem) * 100) / 100);
+    }
+    for (const d of candidates) {
+      d.corgiPremium = totals.get(d.id) ?? 0;
+      d.confirmed = d.corgiPremium > 0;
+      d.corgiRevenueResolved = true;
+    }
+  }
+  return rows;
 }
 
 // ----------------------------------------------------------------------------
@@ -337,8 +445,25 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   const mapped = deals
     .map((d) => mapDeal(d, id2name, corgi))
     .filter((x): x is Prospect => x !== null);
-  // Collapse duplicate company rows down to one deal each.
-  return dedupeByCompany(mapped);
+  // Collapse duplicate company rows, THEN spread each company's purchased Corgi
+  // policies across the surviving deals (so nothing is double-counted).
+  const rows = distributeCorgiRevenue(dedupeByCompany(mapped), corgi);
+
+  // Attach the customer/BDR contact dates from HubSpot engagements (calls +
+  // incoming emails). Best-effort and only for the deals we actually show, so a
+  // slow or failed enrichment never blocks the deals themselves.
+  const bdrOwnerIds = new Set(bdrIds); // our BDRs' HubSpot user ids
+  const engagements = await enrichEngagements(
+    token,
+    rows.map((r) => String(r.id)),
+    (ownerId) => Boolean(ownerId) && bdrOwnerIds.has(ownerId!),
+  );
+  for (const r of rows) {
+    const e: Engagement | undefined = engagements.get(String(r.id));
+    r.lastInbound = e?.lastInbound ?? null;
+    r.lastBdrOutbound = e?.lastBdrOutbound ?? null;
+  }
+  return rows;
 }
 
 export async function GET() {

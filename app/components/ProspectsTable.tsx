@@ -5,6 +5,7 @@ import {
   STAGES,
   dealHealth,
   daysSinceContact,
+  dealValue,
   hubspotUrl,
   effectiveStage,
   type DealHealth,
@@ -61,15 +62,30 @@ const LEGEND: { health: DealHealth; label: string }[] = [
 ];
 
 // Which columns you can sort by, and how to read each value out of a row.
-type SortKey = "company" | "stage" | "bdr" | "ae" | "lastContact" | "quote";
+type SortKey =
+  | "company"
+  | "stage"
+  | "bdr"
+  | "ae"
+  | "lastInbound"
+  | "lastBdrOutbound"
+  | "quote";
 
-const COLUMNS: { key: SortKey | null; label: string }[] = [
+// Plain-English tooltips for the two engagement columns, so it's clear what
+// each date means (and the honest limitation on BDR-sent emails).
+const INBOUND_HINT =
+  "Last time the customer reached in — an inbound call that connected, or an email received from their contacts in HubSpot.";
+const OUTBOUND_HINT =
+  "Last time a BDR reached out — based on outbound calls the BDR logged in HubSpot. (BDR-sent emails aren't always attributed to a person in HubSpot, so they aren't counted here.)";
+
+const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "company", label: "Company" },
   { key: "stage", label: "Stage" },
   { key: "bdr", label: "BDR" },
   { key: "ae", label: "AE" },
-  { key: "lastContact", label: "Last Positive Contact" },
-  { key: "quote", label: "Quote" },
+  { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
+  { key: "lastBdrOutbound", label: "Last Contacted", hint: OUTBOUND_HINT },
+  { key: "quote", label: "Quote (Corgi)" },
   { key: null, label: "Notes" },
 ];
 
@@ -132,8 +148,10 @@ export default function ProspectsTable({
     }
 
     const sorted = [...out].sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
+      // The "Quote" column shows the deal's Corgi value (dealValue), so sort by
+      // that same figure rather than the raw HubSpot amount.
+      const av = sortKey === "quote" ? dealValue(a) : a[sortKey];
+      const bv = sortKey === "quote" ? dealValue(b) : b[sortKey];
       let cmp: number;
       if (typeof av === "number" && typeof bv === "number") {
         cmp = av - bv;
@@ -177,7 +195,7 @@ export default function ProspectsTable({
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-white/50 bg-gradient-to-b from-white/60 to-white/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-16px_rgba(0,0,0,0.18)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.12] dark:from-white/[0.08] dark:to-white/[0.03]">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead>
             <tr className="border-b border-black/5 text-xs uppercase tracking-wider text-neutral-500 dark:border-white/10 dark:text-neutral-400">
               {COLUMNS.map((c) => (
@@ -211,6 +229,7 @@ export default function ProspectsTable({
                   ) : c.key ? (
                     <button
                       onClick={() => toggleSort(c.key!)}
+                      title={c.hint}
                       className="inline-flex items-center gap-1 transition hover:text-neutral-800 dark:hover:text-neutral-200"
                     >
                       {c.label}
@@ -250,9 +269,18 @@ export default function ProspectsTable({
                 <td className="px-4 py-3">{r.bdr}</td>
                 <td className="px-4 py-3">{r.ae}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
-                  {prettyDate(r.lastContact)}
+                  {r.lastInbound ? prettyDate(r.lastInbound) : <span className="text-neutral-400">—</span>}
                 </td>
-                <td className="px-4 py-3 tabular-nums">{moneyFull(r.quote)}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
+                  {r.lastBdrOutbound ? prettyDate(r.lastBdrOutbound) : <span className="text-neutral-400">—</span>}
+                </td>
+                <td className="px-4 py-3 tabular-nums">
+                  {dealValue(r) > 0 ? (
+                    moneyFull(dealValue(r))
+                  ) : (
+                    <span className="text-neutral-400">—</span>
+                  )}
+                </td>
                 <td className="max-w-[220px] truncate px-4 py-3 text-neutral-500 dark:text-neutral-400">
                   {r.notes}
                 </td>
