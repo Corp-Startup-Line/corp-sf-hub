@@ -67,7 +67,7 @@ export default function Header() {
       <div>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Corgi Corp London Pipeline
+            Corgi Pipeline
           </h1>
           <LiveDot />
         </div>
