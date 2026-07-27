@@ -15,64 +15,54 @@ function shortMonth(m: string): string {
   return new Date(year, month - 1, 1).toLocaleDateString("en-GB", { month: "short" });
 }
 
-// ---- Won value by month: a soft ginger area + line -------------------------
+// ---- Won value by month: clean vertical bars -------------------------------
+// A line was the wrong shape for this data — most months are $0 with one big
+// month, so a line just drew a lonely spike over a lot of empty space. Bars sit
+// evenly across the card, fill the width, and the real numbers live ON the
+// chart: each bar is labelled with its won value; the month and deal count sit
+// underneath. Empty months are simply short, which reads as "quiet", not broken.
 export function WonTrend({ data }: { data: MonthPoint[] }) {
-  const W = 560;
-  const H = 200;
-  const P = 30; // padding inside the SVG so labels/dots aren't clipped
   const max = Math.max(...data.map((d) => d.wonValue), 1);
-  const stepX = (W - P * 2) / Math.max(data.length - 1, 1);
-  const x = (i: number) => P + i * stepX;
-  const y = (v: number) => H - P - (v / max) * (H - P * 2);
-
-  const linePts = data.map((d, i) => `${x(i)},${y(d.wonValue)}`).join(" ");
-  const areaPts = `${x(0)},${H - P} ${linePts} ${x(data.length - 1)},${H - P}`;
   const hasData = data.some((d) => d.wonValue > 0);
 
   return (
     <Card>
       <SectionLabel>Won Value by Month</SectionLabel>
       {hasData ? (
-        <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" role="img">
-          <defs>
-            <linearGradient id="wonFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-corgi-ginger)" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="var(--color-corgi-ginger)" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          {/* filled area under the line */}
-          <polygon points={areaPts} fill="url(#wonFill)" />
-
-          {/* the line itself */}
-          <polyline
-            points={linePts}
-            fill="none"
-            stroke="var(--color-corgi-ginger)"
-            strokeWidth={2.5}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-
-          {/* dot + month label + value-on-hover for each point */}
-          {data.map((d, i) => (
-            <g key={d.month}>
-              <circle cx={x(i)} cy={y(d.wonValue)} r={3.5} fill="var(--color-corgi-ginger)">
-                <title>
-                  {shortMonth(d.month)}: {moneyFull(d.wonValue)} ({d.wonCount} won)
-                </title>
-              </circle>
-              <text
-                x={x(i)}
-                y={H - 8}
-                textAnchor="middle"
-                className="fill-neutral-400 text-[10px]"
+        <div className="mt-6 flex h-44 w-full items-stretch gap-4">
+          {data.map((d) => {
+            const pct = (d.wonValue / max) * 100;
+            return (
+              <div
+                key={d.month}
+                className="flex flex-1 flex-col items-center"
+                title={`${shortMonth(d.month)}: ${moneyFull(d.wonValue)} (${d.wonCount} won)`}
               >
-                {shortMonth(d.month)}
-              </text>
-            </g>
-          ))}
-        </svg>
+                {/* bar area — grows from a shared baseline */}
+                <div className="flex w-full flex-1 flex-col items-center justify-end">
+                  {d.wonValue > 0 && (
+                    <span className="mb-1.5 text-[11px] font-semibold tabular-nums text-corgi-ginger">
+                      {money(d.wonValue)}
+                    </span>
+                  )}
+                  <div
+                    className="w-full max-w-[52px] rounded-t-lg bg-gradient-to-t from-corgi-ginger/60 to-corgi-ginger transition-[height] duration-700 ease-out"
+                    style={{ height: `${pct}%`, minHeight: d.wonValue > 0 ? 4 : 0 }}
+                  />
+                </div>
+                {/* month + deal count under the baseline */}
+                <div className="mt-2.5 flex flex-col items-center gap-0.5">
+                  <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                    {shortMonth(d.month)}
+                  </span>
+                  <span className="text-[9px] text-neutral-400">
+                    {d.wonCount ? `${d.wonCount} won` : "—"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <EmptyChart>No won deals in the current view.</EmptyChart>
       )}

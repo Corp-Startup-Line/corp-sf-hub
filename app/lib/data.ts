@@ -95,6 +95,9 @@ export const QUOTA = {
 // date; here it's fixed so the stale-deal alert has a believable mix.
 export const TODAY = "2026-06-18";
 
+// The "YYYY-MM" of TODAY — used to scope the monthly quota to the current month.
+export const CURRENT_MONTH = TODAY.slice(0, 7);
+
 // A deal is "at risk" after this many days with no positive contact,
 // and shows a warning once it reaches WARN_DAYS (the "about to slip" zone).
 export const STALE_DAYS = 4;
@@ -133,22 +136,37 @@ export type Prospect = {
   corgiRevenueResolved?: boolean; // Corgi owns this deal's value (don't fall back to HubSpot)
 };
 
-// The ONE source of truth for which stage a deal counts as — its HubSpot stage,
-// full stop. HubSpot is authoritative for the pipeline: "Quoted" means the deal
-// sits in HubSpot's Quoted (or Contract Sent) stage, i.e. a quote was actually
-// sent on HubSpot — NOT merely that Corgi/Django has a quote for the company.
-// "Discovery" is HubSpot's "qualifiedtobuy" (meeting set + post-meeting
-// activity), mapped to our "Qualified". Because the funnel count, the
-// click-through list, and the stage badge all call this same function, every
-// stage filter is strict: clicking a card shows exactly the deals that card
-// counted, and a deal lives in one stage only.
+// The ONE source of truth for which stage a deal counts as. A quote is the key
+// signal a BDR cares about, and BDRs raise quotes in Corgi/Django — the matching
+// HubSpot deal stage frequently lags behind (still reading "Meeting Booked" or
+// "Discovery" long after a quote went out). Trusting the HubSpot stage alone
+// therefore HID real quoting activity: 234 live deals had a Corgi quote but sat
+// in an earlier HubSpot stage, so the "Quoted" bucket looked almost empty. So
+// the rule is: a still-live deal that Corgi has quoted counts as "Quoted", even
+// if HubSpot hasn't caught up. Decided outcomes (Won / Ghosting / Closed Lost)
+// always stand as-is, and we only ever promote a deal UP to Quoted, never
+// demote one. The funnel count, the click-through list, and the stage badge all
+// call this same function, so every stage filter stays in sync.
 export function effectiveStage(p: Prospect): Stage {
+  // A won, ghosted, or lost deal keeps its outcome even if Corgi has a quote.
+  if (
+    p.stage === "Closed Won" ||
+    p.stage === "Ghosting" ||
+    p.stage === "Closed Lost"
+  ) {
+    return p.stage;
+  }
+  // A live deal quoted in Corgi is "Quoted" regardless of its HubSpot stage,
+  // as long as it isn't already further along than Quoted.
+  if (p.hasCorgiQuote && STAGE_RANK[p.stage] < STAGE_RANK.Quoted) {
+    return "Quoted";
+  }
   return p.stage;
 }
 
-// A deal counts as "Quoted" only when its HubSpot stage is Quoted (a quote was
-// sent on HubSpot). Corgi/Django having a quote for the company does NOT move a
-// deal into this bucket — HubSpot owns the pipeline stage.
+// A deal counts as "Quoted" when it sits in HubSpot's Quoted stage OR Corgi has
+// a quote for it (see effectiveStage) — because a BDR's quote lives in Corgi and
+// the HubSpot stage often hasn't caught up.
 export function isQuoted(p: Prospect): boolean {
   return effectiveStage(p) === "Quoted";
 }
@@ -259,7 +277,6 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   // Every deal is at least a booked meeting, so a "Meetings Booked" card would
   // just repeat "Total Deals" — it's deliberately left out of the funnel.
   const totalDeals = rows.length;
-  const qualified = inStage("Qualified");
   // "Quoted" = deals sitting in HubSpot's Quoted / Contract Sent stage.
   const quoted = inStage("Quoted");
   const won = inStage("Closed Won");
@@ -270,7 +287,6 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
 
   return [
     { label: "Total Deals", count: totalDeals, pct: 100, filter: "all" },
-    { label: "Qualified", count: qualified, pct: pct(qualified), filter: "Qualified" },
     { label: "Quoted", count: quoted, pct: pct(quoted), filter: "Quoted" },
     { label: "Closed Won", count: won, pct: pct(won), filter: "Closed Won" },
     { label: "Ghosting", count: ghosting, pct: pct(ghosting), filter: "Ghosting" },
@@ -301,16 +317,31 @@ export type QuotaProgress = {
   target: number;
   won: number;
   pct: number; // 0..100+ (can exceed 100)
+  allTime: boolean; // true = whole-history view, false = one month in view
 };
 
-// Team quota vs. Closed Won value. If a single BDR is selected, use the
-// per-BDR target instead so the bar makes sense for one person.
+// Progress vs. quota. The default (main) view is ALL-TIME: every Closed Won
+// deal ever, compared against the all-time target (team $3.6M, BDR $600k).
+// Pick a specific month from the Month filter and it narrows to that one month
+// vs the monthly target (team $300k, BDR $50k). The "won" side and the target
+// always match the same window, so the percentage is honest either way.
 export function computeQuota(rows: Prospect[], f: Filters): QuotaProgress {
   const singleBdr = f.bdr !== "all";
-  const target = singleBdr ? QUOTA.bdrMonthly : QUOTA.teamMonthly;
-  const won = sumValue(rows.filter((r) => r.stage === "Closed Won"));
+  const allTime = f.month === "all";
+  const target = allTime
+    ? singleBdr
+      ? QUOTA.bdrAnnual
+      : QUOTA.teamAnnual
+    : singleBdr
+      ? QUOTA.bdrMonthly
+      : QUOTA.teamMonthly;
+  const won = sumValue(
+    rows.filter(
+      (r) => (allTime || r.month === f.month) && r.stage === "Closed Won",
+    ),
+  );
   const pct = Math.round((won / target) * 100);
-  return { target, won, pct };
+  return { target, won, pct, allTime };
 }
 
 export type RepStat = {
@@ -421,27 +452,19 @@ export function computeInsights(rows: Prospect[]): Insight[] {
 
   const k = computeKpis(rows);
   const openStages: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
+  // Rank and value open deals by dealValue (the Corgi QUOTED premium when we
+  // have one), NOT the raw HubSpot amount — a freshly-quoted deal often has a $0
+  // HubSpot amount but a real Corgi quote, so sorting/showing by `quote` would
+  // both mis-rank it and print "$0" (e.g. Kategos, quoted at $7,741).
   const open = rows
     .filter((r) => openStages.includes(r.stage))
-    .sort((a, b) => b.quote - a.quote);
-
-  // Top-closing BDR by won value (roster derived from the rows in view).
-  const bdrRoster = Array.from(new Set(rows.map((r) => r.bdr).filter(Boolean)));
-  const topBdr = computeRepStats(rows, "bdr", bdrRoster)
-    .filter((s) => s.wonValue > 0)
-    .sort((a, b) => b.wonValue - a.wonValue)[0];
-  if (topBdr) {
-    out.push({
-      tone: "success",
-      text: `${topBdr.name} leads with ${fmtMoney(topBdr.wonValue)} won across ${plural(topBdr.wonCount, "deal")}.`,
-    });
-  }
+    .sort((a, b) => dealValue(b) - dealValue(a));
 
   // Ghosting drag.
   const ghost = rows.filter((r) => r.stage === "Ghosting");
   if (ghost.length) {
     const pct = Math.round((ghost.length / rows.length) * 100);
-    const val = sum(ghost, "quote");
+    const val = ghost.reduce((s, r) => s + dealValue(r), 0);
     out.push({
       tone: "warning",
       text: `${pct}% of deals are ghosting — ${plural(ghost.length, "deal")} worth ${fmtMoney(val)}.`,
@@ -453,15 +476,9 @@ export function computeInsights(rows: Prospect[]): Insight[] {
     const big = open[0];
     out.push({
       tone: "info",
-      text: `Largest open deal: ${big.company} at ${fmtMoney(big.quote)} (${big.stage}).`,
+      text: `Largest open deal: ${big.company} at ${fmtMoney(dealValue(big))} (${big.stage}).`,
     });
   }
-
-  // Win rate, framed as good or worth watching.
-  out.push({
-    tone: k.winRate >= 50 ? "success" : "warning",
-    text: `Win rate is ${k.winRate}% of deals that reached a decision.`,
-  });
 
   // Pipeline still open.
   out.push({
@@ -481,9 +498,19 @@ function daysBetween(from: string, to: string): number {
   return Math.floor(ms / 86_400_000);
 }
 
+// The date of a deal's last POSITIVE contact. On live deals this is lastInbound
+// (a call that connected in either direction, or an email the customer sent us);
+// the sample rows only carry lastContact, so we fall back to that. This is the
+// signal a BDR cares about for "is this deal going stale / at risk of being
+// stolen" — a customer who's gone quiet, not just any logged touch.
+export function lastPositiveContact(p: Prospect): string | null {
+  return p.lastInbound ?? p.lastContact;
+}
+
 // Days since the last positive contact — null if none has ever been logged.
 export function daysSinceContact(p: Prospect, today: string = TODAY): number | null {
-  return p.lastContact === null ? null : daysBetween(p.lastContact, today);
+  const last = lastPositiveContact(p);
+  return last === null ? null : daysBetween(last, today);
 }
 
 // A single deal's traffic-light status:
@@ -503,6 +530,29 @@ export function dealHealth(p: Prospect, today: string = TODAY): DealHealth {
   if (d >= STALE_DAYS) return "risk";
   if (d >= WARN_DAYS) return "warning";
   return "safe";
+}
+
+// The deals a BDR should chase RIGHT NOW: still-open deals (Meeting Booked,
+// Qualified, or Quoted) where the customer hasn't made positive contact in
+// WARN_DAYS (3) or more. A deal with no positive contact ever logged counts
+// too. Ranked so the sharpest "at risk of being stolen" signal floats to the
+// top: a deal that WAS in touch and has since gone quiet ranks by how long
+// it's been silent (longest first); deals that never had positive contact rank
+// last, because a customer who engaged and then went dark is the more urgent
+// save than one that was never worked.
+export function atRiskDeals(rows: Prospect[], today: string = TODAY): Prospect[] {
+  const openStages: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
+  const rank = (p: Prospect) => {
+    const d = daysSinceContact(p, today);
+    return d === null ? -1 : d; // never-contacted ranks below any real silence
+  };
+  return rows
+    .filter((r) => openStages.includes(effectiveStage(r)))
+    .filter((r) => {
+      const d = daysSinceContact(r, today);
+      return d === null || d >= WARN_DAYS;
+    })
+    .sort((a, b) => rank(b) - rank(a));
 }
 
 // A deal's HubSpot record link. Placeholder per-deal URL for the sample data.
@@ -525,6 +575,10 @@ function sum(rows: Prospect[], key: "quote"): number {
 export function dealValue(p: Prospect): number {
   // Closed/Corgi-owned deal → the confirmed purchased premium (0 = no policy).
   if (p.corgiRevenueResolved) return p.corgiPremium || 0;
+  // A Closed Won deal with no resolved Corgi policy → the HubSpot amount only. A
+  // QUOTED premium is NOT revenue, so a won deal must never fall back to it (that
+  // used to overstate wins whose purchased policy carried a $0 premium in Corgi).
+  if (p.stage === "Closed Won") return p.corgiPremium || p.quote || 0;
   // Open deal → its pipeline value: the Corgi QUOTED premium (what we quoted the
   // customer) is the source of truth, falling back to the HubSpot amount only
   // when Corgi has no quote. This feeds the Pipeline KPI and the deal finder's

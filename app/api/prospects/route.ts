@@ -14,7 +14,9 @@ import {
   getCorgiIndex,
   matchCompany,
   normalizeCompany,
+  normalizeEmail,
   type CorgiCompany,
+  type CorgiIndex,
 } from "./corgi";
 import { enrichEngagements, type Engagement } from "./engagements";
 
@@ -84,6 +86,7 @@ const DEAL_PROPERTIES = [
   "bdr",
   "hubspot_owner_id",
   "notes_last_contacted",
+  "hs_last_sales_activity_timestamp",
   "closedate",
   "createdate",
 ];
@@ -189,7 +192,7 @@ function toDate(iso: string | null | undefined): string | null {
 function mapDeal(
   d: HubSpotDeal,
   id2name: Map<string, string>,
-  corgi: Map<string, CorgiCompany> | null,
+  byCompany: Map<string, CorgiCompany> | null,
 ): Prospect | null {
   const p = d.properties;
   const stage = STAGE_BY_HUBSPOT[p.dealstage ?? ""];
@@ -205,7 +208,19 @@ function mapDeal(
   // Only surface corp AEs; anyone else's name becomes "Unassigned" so they
   // don't appear as an AE card/filter option (the deal itself is kept).
   const ae = TEAM_AES.has(ownerName) ? ownerName : "Unassigned";
-  const when = p.closedate || p.createdate || "";
+  // Which month a deal belongs to. A HubSpot data migration on ~2026-06-18
+  // OVERWROTE the closedate of every then-existing Closed Won deal, stamping the
+  // whole back-catalogue into June 2026 (this collapsed the year's wins into one
+  // giant fake June bar). Deals closed AFTER the migration carry a REAL closedate
+  // (e.g. genuine July wins). So: trust closedate normally, but for anything
+  // stamped in the June-2026 migration month fall back to createdate (when the
+  // deal was actually worked). Open deals have no closedate → createdate too.
+  const MIGRATION_MONTH = "2026-06";
+  const closeMonth = (p.closedate ?? "").slice(0, 7);
+  const when =
+    p.closedate && closeMonth !== MIGRATION_MONTH
+      ? p.closedate
+      : p.createdate || p.closedate || "";
 
   const company = (p.dealname ?? "Untitled")
     .replace(/\s*-\s*New Deal\s*$/i, "")
@@ -213,7 +228,7 @@ function mapDeal(
   // Look up THIS company's Corgi/Django record (all its quotes). When the Corgi
   // index is unavailable (null), leave the quote fields undefined so the
   // dashboard falls back to the HubSpot deal amount instead of showing zeroes.
-  const c = corgi ? matchCompany(corgi, company) : null;
+  const c = byCompany ? matchCompany(byCompany, company) : null;
   const base: Prospect = {
     id: Number(d.id),
     company,
@@ -226,9 +241,16 @@ function mapDeal(
     notes: "",
     month: when.slice(0, 7), // "YYYY-MM"
     confirmed: stage === "Closed Won", // fallback until Corgi says otherwise
-    lastContact: toDate(p.notes_last_contacted),
+    // Every deal must carry a real HubSpot date. Prefer the true "Last
+    // Contacted" stamp; fall back to HubSpot's last sales-activity timestamp,
+    // then to the deal's creation date as a floor ("nothing since it was
+    // created"). This guarantees no deal is left with a null contact date.
+    lastContact:
+      toDate(p.notes_last_contacted) ??
+      toDate(p.hs_last_sales_activity_timestamp) ??
+      toDate(p.createdate),
   };
-  if (!corgi) return base; // Corgi unavailable → stage-based fallback only
+  if (!byCompany) return base; // Corgi unavailable → stage-based fallback only
 
   // The actual premium is filled in AFTER de-duping (distributeCorgiRevenue),
   // because a company's purchased policies are spread across its surviving deals
@@ -256,86 +278,223 @@ const OWNERSHIP_OVERRIDES: Record<string, string> = {
   [normalizeCompany("Mainstay Digital")]: "Carwyn Chiramel",
 };
 
-// ----------------------------------------------------------------------------
-// Spread each company's PURCHASED Corgi policies across its (de-duped) HubSpot
-// deals. One deal + one company total is the common case. When a company has
-// several deals (e.g. AdvisorGenie's two policies), each policy is credited to
-// the deal whose HubSpot amount is closest to it — so the company total is
-// preserved exactly and no policy is ever counted on two deals. Deals in a
-// Corgi-covered company that receive no policy show $0 (Corgi is authoritative);
-// companies with no purchased policy are left for the HubSpot-amount fallback.
-// ----------------------------------------------------------------------------
-function distributeCorgiRevenue(
-  rows: Prospect[],
-  corgi: Map<string, CorgiCompany> | null,
-): Prospect[] {
-  if (!corgi) return rows;
+// The BASE company for a HubSpot deal, with any trailing deal-type suffix
+// removed ("Trellus (YC W22) - D&O upsell" and "Trellus (YC W22) - D&O" both →
+// "trellus yc w22"; "Journey - Upsell" → "journey"). This lets a company's base
+// deal and its follow-on deals (upsell / D&O / reinstatement) each match the same
+// Django customer's policies even when only one of them carries a contact email.
+// Only strips a trailing " - <...>" segment; names without one are unchanged.
+function baseCompanyKey(company: string): string {
+  const stripped = company.replace(/\s*[-–—]\s+.*$/, "").trim();
+  return normalizeCompany(stripped) || normalizeCompany(company);
+}
 
-  const groups = new Map<string, Prospect[]>();
-  for (const r of rows) {
-    const key = normalizeCompany(r.company);
-    const g = groups.get(key);
-    if (g) g.push(r);
-    else groups.set(key, [r]);
+// ----------------------------------------------------------------------------
+// Credit each Closed Won deal with the real premium of the Django POLICY it sold,
+// using the /policies feed as the single source of truth (the /quotes feed marks
+// bought policies "purchased" but zeroes their premium, which used to make wins
+// fall back to the QUOTED figure or to another company matched by a shared email
+// — both overstated the number).
+//
+// Every policy is a distinct sale (policy_number) and is assigned to EXACTLY ONE
+// won deal — the candidate whose HubSpot amount is nearest, biggest policies
+// first — so no sale is ever counted twice, even when several deals share a
+// broker email. A deal is a candidate for a policy when any of its handles (its
+// company name, its family's base name, or the buyer's email) matches one of the
+// policy's handles. Each credited deal is also dated by its policy's real
+// purchase month (purchased_at), fixing wins mis-dated by HubSpot's June-2026
+// migration.
+//
+// A won deal whose COMPANY NAME matches a Django policy is "Corgi-owned": if it
+// wins no policy (its sale went to a sibling deal) it shows $0, never a fallback,
+// so a customer's total is never inflated. A won deal that only ever matched by a
+// shared email and won nothing is left alone (keeps its HubSpot amount), so a
+// broker inbox can't wrongly zero an unrelated deal.
+// ----------------------------------------------------------------------------
+function resolveCorgiRevenue(
+  rows: Prospect[],
+  index: CorgiIndex,
+  emailByDeal: Map<number, string>,
+): Prospect[] {
+  const won = rows.filter((r) => r.stage === "Closed Won");
+  if (won.length === 0) return rows;
+
+  // Handles each won deal can be matched to a policy on: its own name, its
+  // family's base name (strong "name" handles), and the buyer's email (a weaker
+  // handle — a broker inbox can span many companies).
+  const nameHandles = new Map<number, Set<string>>();
+  const allHandles = new Map<number, Set<string>>();
+  for (const d of won) {
+    const names = new Set<string>(
+      [normalizeCompany(d.company), baseCompanyKey(d.company)].filter(Boolean),
+    );
+    const all = new Set<string>(names);
+    const email = normalizeEmail(emailByDeal.get(d.id) ?? "");
+    if (email) all.add(email);
+    nameHandles.set(d.id, names);
+    allHandles.set(d.id, all);
   }
 
-  for (const [key, deals] of groups) {
-    const c = corgi.get(key);
-    if (!c || c.purchasedPremiums.length === 0) continue; // HubSpot fallback
-
-    // A purchased policy is confirmed (won) money, so Corgi owns EVERY one of
-    // this company's Closed Won deals (open/ghosted deals keep their HubSpot
-    // pipeline amount). Mark them all resolved with $0 up front; the ones that
-    // draw a policy below get their premium, and the rest stay at $0 rather than
-    // falling back to the HubSpot amount (which would double-count the policy).
-    const wonDeals = deals.filter((d) => d.stage === "Closed Won");
-    const owned = wonDeals.length ? wonDeals : deals;
-    for (const d of owned) {
-      d.corgiPremium = 0;
-      d.confirmed = false;
-      d.corgiRevenueResolved = true;
-    }
-
-    // Which owned deals actually RECEIVE the premiums. A manual ownership call
-    // (e.g. Mainstay Digital) pins a genuine tie to one rep so the policy lands
-    // on the right BDR instead of whichever identical deal sorted first;
-    // otherwise every owned deal competes for the nearest-amount match.
-    let candidates = owned;
-    const owner = OWNERSHIP_OVERRIDES[key];
-    if (owner) {
-      const pinned = owned.filter((d) => d.bdr === owner);
-      if (pinned.length) candidates = pinned;
-    }
-
-    if (candidates.length === 1) {
-      candidates[0].corgiPremium = c.purchasedSum;
-      candidates[0].confirmed = true;
-      candidates[0].corgiRevenueResolved = true;
-      continue;
-    }
-
-    // Several won deals for one company: give each policy to the won deal whose
-    // HubSpot amount is nearest, biggest policies first. The company total is
-    // preserved and no policy is counted twice; a won deal that draws no policy
-    // shows $0 (Corgi says there's no separate bought policy behind it).
-    const premiums = [...c.purchasedPremiums].sort((a, b) => b - a);
-    const totals = new Map<number, number>(candidates.map((d) => [d.id, 0]));
-    for (const prem of premiums) {
-      let best = candidates[0];
-      let bestDiff = Infinity;
-      for (const d of candidates) {
-        const diff = Math.abs((d.quote || 0) - prem);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          best = d;
-        }
+  // Assign each distinct policy to exactly one won deal (biggest first, nearest
+  // HubSpot amount). Tally the premium and remember the policy's month per deal.
+  const premiumByDeal = new Map<number, number>();
+  const monthByDeal = new Map<number, string>();
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const policies = [...index.policies].sort((a, b) => b.premium - a.premium);
+  for (const pol of policies) {
+    const cands = won.filter((d) =>
+      pol.keys.some((k) => allHandles.get(d.id)!.has(k)),
+    );
+    if (cands.length === 0) continue;
+    // A NAME match beats an EMAIL match: a policy filed under a company's legal
+    // name belongs to THAT company's deal, never to a stranger who merely shares
+    // the buyer's (often brokered) email. Only when no deal matches the policy by
+    // name do we let the email-matched deals compete for it.
+    const nameCands = cands.filter((d) =>
+      pol.nameKeys.some((k) => nameHandles.get(d.id)!.has(k)),
+    );
+    const scoped = nameCands.length ? nameCands : cands;
+    // Honour a manual ownership call when a candidate for this exact policy is
+    // pinned to a BDR (a human-confirmed tie), else take the nearest amount.
+    const pinned = scoped.filter(
+      (d) => OWNERSHIP_OVERRIDES[normalizeCompany(d.company)] === d.bdr,
+    );
+    const pool = pinned.length ? pinned : scoped;
+    let best = pool[0];
+    let bestDiff = Infinity;
+    for (const d of pool) {
+      const diff = Math.abs((d.quote || 0) - pol.premium);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = d;
       }
-      totals.set(best.id, Math.round((totals.get(best.id)! + prem) * 100) / 100);
     }
-    for (const d of candidates) {
-      d.corgiPremium = totals.get(d.id) ?? 0;
-      d.confirmed = d.corgiPremium > 0;
-      d.corgiRevenueResolved = true;
+    premiumByDeal.set(best.id, round2((premiumByDeal.get(best.id) ?? 0) + pol.premium));
+    if (!monthByDeal.has(best.id)) monthByDeal.set(best.id, pol.month);
+  }
+
+  // --------------------------------------------------------------------------
+  // Consolidate a customer's scattered policies onto ONE deal. A single
+  // customer often has several Closed-Won deals (a base deal plus "- Upsell" /
+  // "- Reinstatement" lines) and files several policies; the per-policy
+  // nearest-amount match above can pile every policy onto one sibling and leave
+  // the others at $0, so the main deal misleadingly shows "—". We group sibling
+  // deals that share a company name (or are bridged by a single policy carrying
+  // both a legal name and an organization name, e.g. "Altrina Corporation" /
+  // "Hammr"), keep every group inside a single BDR so no rep's total can shift,
+  // and move each group's whole premium onto its primary deal (the base line,
+  // the one with no deal-type suffix).
+  // --------------------------------------------------------------------------
+  const parent = new Map<number, number>();
+  const find = (x: number): number => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    for (let c = x; c !== r; ) {
+      const n = parent.get(c)!;
+      parent.set(c, r);
+      c = n;
+    }
+    return r;
+  };
+  const union = (a: number, b: number) => parent.set(find(a), find(b));
+  for (const d of won) parent.set(d.id, d.id);
+  // Link deals that share a company-name handle (base + its "- Upsell" lines).
+  const byNameHandle = new Map<string, number[]>();
+  for (const d of won)
+    for (const k of nameHandles.get(d.id)!) {
+      const a = byNameHandle.get(k) ?? [];
+      a.push(d.id);
+      byNameHandle.set(k, a);
+    }
+  for (const ids of byNameHandle.values())
+    for (let i = 1; i < ids.length; i++) union(ids[0], ids[i]);
+  // Link deals bridged by one policy that carries several names.
+  for (const pol of index.policies) {
+    const linked = won.filter((d) =>
+      pol.nameKeys.some((k) => nameHandles.get(d.id)!.has(k)),
+    );
+    for (let i = 1; i < linked.length; i++) union(linked[0].id, linked[i].id);
+  }
+  // Bucket by (customer group, BDR) so a rep's total never moves to another.
+  const groups = new Map<string, Prospect[]>();
+  for (const d of won) {
+    const key = `${find(d.id)}|${d.bdr}`;
+    const a = groups.get(key) ?? [];
+    a.push(d);
+    groups.set(key, a);
+  }
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const total = round2(
+      members.reduce((s, d) => s + (premiumByDeal.get(d.id) ?? 0), 0),
+    );
+    if (total === 0) continue;
+    // Primary = the base line (name has no "- suffix"), else the largest
+    // HubSpot amount, then the lowest id — always deterministic.
+    const primary = [...members].sort((a, b) => {
+      const asuf = normalizeCompany(a.company) === baseCompanyKey(a.company) ? 0 : 1;
+      const bsuf = normalizeCompany(b.company) === baseCompanyKey(b.company) ? 0 : 1;
+      if (asuf !== bsuf) return asuf - bsuf;
+      if ((b.quote || 0) !== (a.quote || 0)) return (b.quote || 0) - (a.quote || 0);
+      return a.id - b.id;
+    })[0];
+    const month = members
+      .map((d) => monthByDeal.get(d.id))
+      .filter(Boolean)
+      .sort()[0];
+    for (const d of members) {
+      premiumByDeal.set(d.id, d.id === primary.id ? total : 0);
+    }
+    if (month) monthByDeal.set(primary.id, month);
+  }
+
+  // Every Django policy NAME handle, so we can tell a "Corgi-owned" won deal
+  // (its company name is on a real policy) from one Corgi has never heard of.
+  const policyNameKeys = new Set<string>();
+  for (const pol of index.policies)
+    for (const k of pol.nameKeys) policyNameKeys.add(k);
+
+  for (const d of won) {
+    const wonPremium = premiumByDeal.get(d.id) ?? 0;
+    const nameMatched = [...nameHandles.get(d.id)!].some((k) =>
+      policyNameKeys.has(k),
+    );
+    if (wonPremium === 0 && !nameMatched) continue; // no Corgi purchase → HubSpot amount
+    d.corgiRevenueResolved = true; // Corgi owns the value (0 = no policy, not a fallback)
+    d.corgiPremium = wonPremium;
+    d.confirmed = wonPremium > 0;
+    const m = monthByDeal.get(d.id);
+    if (m) d.month = m;
+  }
+  return rows;
+}
+
+// ----------------------------------------------------------------------------
+// Fill in quoted premiums on OPEN deals that Django quoted under a different
+// company name. Open/Meeting-Booked deals only get a quote figure when their
+// HubSpot company name matches Django's spelling, so many genuinely-quoted deals
+// showed no quote ("—"). Django keys the same buyer reliably by EMAIL, so for any
+// open deal that has a contact email but no company-name quote, we look up that
+// email's largest quoted (not-yet-purchased) premium and surface it. Purchased
+// deals are untouched (their revenue is resolved separately); this only ever
+// fills a missing quote, never overwrites one already found by name.
+// ----------------------------------------------------------------------------
+const OPEN_STAGES: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
+
+function enrichOpenQuotes(
+  rows: Prospect[],
+  index: CorgiIndex,
+  emailByDeal: Map<number, string>,
+): Prospect[] {
+  for (const r of rows) {
+    if (!OPEN_STAGES.includes(r.stage)) continue;
+    if ((r.corgiQuotedPremium ?? 0) > 0) continue; // already have a quote
+    const email = normalizeEmail(emailByDeal.get(r.id) ?? "");
+    if (!email) continue;
+    const quoted = index.byEmail.get(email)?.quotedPremium ?? 0;
+    if (quoted > 0) {
+      r.corgiQuotedPremium = quoted;
+      r.hasCorgiQuote = true;
     }
   }
   return rows;
@@ -379,28 +538,29 @@ function moreReal(a: Prospect, b: Prospect): boolean {
   return false;
 }
 
-// An empty "shell" deal: no confirmed money, no Corgi quote, not won, and a
-// zero amount. These are the throwaway duplicates HubSpot leaves behind — safe
-// to drop when a real deal exists for the same company. A deal that is ANY of
-// won / quoted / has-an-amount is "real" and is NEVER dropped, so no genuine
-// Closed Won (or other real deal) can ever go missing.
-function isShell(p: Prospect): boolean {
-  return (
-    !p.confirmed &&
-    !p.hasCorgiQuote &&
-    p.stage !== "Closed Won" &&
-    (p.quote || 0) === 0
-  );
+// Sort comparator: most-real deal first; on a realness tie, the NEWER deal (by
+// create date) wins, since that's the one the rep pushed to the finish line.
+function byRealThenNewer(a: Prospect, b: Prospect): number {
+  if (moreReal(a, b)) return -1;
+  if (moreReal(b, a)) return 1;
+  return ms(b.meetingDate) - ms(a.meetingDate);
 }
 
-// Collapse duplicate company rows. Within each company we keep every REAL deal
-// (so two genuine wins both survive) and throw away only the empty shells. If a
-// company somehow has nothing but shells, we keep the single most-real one so
-// the company still shows up once.
+// Collapse duplicate company rows down to ONE deal per company per BDR. HubSpot
+// routinely holds the same opportunity several times for one rep — a real deal
+// plus an earlier-stage leftover or a ghosted shell — and because the company
+// carries a Corgi quote, every one of those rows looks "real", so they were all
+// surviving and showing as duplicates. A single BDR must never see the same
+// company twice, so within each company+BDR we keep only the most-real row
+// (confirmed money → Corgi quote → furthest stage → biggest amount) and drop
+// the rest. Revenue is safe: the company's full confirmed premium is credited
+// to the surviving deal afterwards (distributeCorgiRevenue). Two different BDRs
+// genuinely working the same company are kept apart (one row each), so neither
+// rep's board loses a deal.
 function dedupeByCompany(rows: Prospect[]): Prospect[] {
   const groups = new Map<string, Prospect[]>();
   for (const r of rows) {
-    const key = r.company.trim().toLowerCase();
+    const key = `${r.company.trim().toLowerCase()}::${r.bdr}`;
     const g = groups.get(key);
     if (g) g.push(r);
     else groups.set(key, [r]);
@@ -412,13 +572,71 @@ function dedupeByCompany(rows: Prospect[]): Prospect[] {
       out.push(group[0]);
       continue;
     }
-    const real = group.filter((r) => !isShell(r));
-    if (real.length > 0) {
-      out.push(...real); // keep all genuine deals, drop the shells
-    } else {
-      // all shells → keep just the most-real of them so the company still shows
-      out.push([...group].sort((a, b) => (moreReal(a, b) ? -1 : 1))[0]);
-    }
+    // Keep the single most-real deal; the others are duplicate HubSpot records
+    // for the same opportunity and must never appear as separate deals. When two
+    // are equally "real" (e.g. both Closed Won), the NEWER deal wins — that's the
+    // one the rep pushed to the finish line (Group B).
+    out.push([...group].sort(byRealThenNewer)[0]);
+  }
+  return out;
+}
+
+// ----------------------------------------------------------------------------
+// Cross-BDR ownership. After the per-BDR de-dupe a company can still appear once
+// under two different BDRs (both reps worked the same account). A company must
+// have exactly ONE owner, decided by the team's rules of engagement:
+//   • Whoever has the most recent POSITIVE contact keeps it. A rep only loses an
+//     account once they've gone quiet — the "no positive contact in 3 days" rule
+//     — so an actively-engaged rep (recent contact) always outranks a stale one.
+//   • If neither rep has any positive contact on record, the most recent deal /
+//     activity (last-contacted or created date) wins.
+//   • A manual ownership override (a human-confirmed call) beats both.
+// The losing rep's row is dropped; revenue is untouched because the company's
+// full confirmed premium is credited to the surviving owner afterwards.
+// ----------------------------------------------------------------------------
+const ms = (iso: string | null): number =>
+  iso ? Date.parse(iso) || 0 : 0;
+
+// Most recent positive contact (a connected call / inbound email).
+const positiveContactTime = (p: Prospect): number => ms(p.lastInbound ?? null);
+// Most recent deal signal when there's no positive contact: last-contacted
+// stamp or the deal's creation date, whichever is newer.
+const dealRecencyTime = (p: Prospect): number =>
+  Math.max(ms(p.lastContact), ms(p.meetingDate));
+
+function ownsMore(a: Prospect, b: Prospect): boolean {
+  const pa = positiveContactTime(a);
+  const pb = positiveContactTime(b);
+  if (pa !== pb) return pa > pb; // most recent positive contact wins (ROE)
+  const ra = dealRecencyTime(a);
+  const rb = dealRecencyTime(b);
+  if (ra !== rb) return ra > rb; // else most recent deal activity
+  return ms(a.meetingDate) > ms(b.meetingDate); // final tie → newer deal wins
+}
+
+function pickOwner(deals: Prospect[]): Prospect {
+  const owner = OWNERSHIP_OVERRIDES[normalizeCompany(deals[0].company)];
+  if (owner) {
+    const pinned = deals.find((d) => d.bdr === owner);
+    if (pinned) return pinned;
+  }
+  return [...deals].sort((a, b) => (ownsMore(a, b) ? -1 : 1))[0];
+}
+
+// Collapse every company down to a single owner (one row per company, full
+// stop). Needs engagement dates (lastInbound) already attached so the rules of
+// engagement above can see who's actively in contact.
+function collapseCrossBdr(rows: Prospect[]): Prospect[] {
+  const groups = new Map<string, Prospect[]>();
+  for (const r of rows) {
+    const key = normalizeCompany(r.company);
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+  const out: Prospect[] = [];
+  for (const group of groups.values()) {
+    out.push(group.length === 1 ? group[0] : pickOwner(group));
   }
   return out;
 }
@@ -442,27 +660,48 @@ async function loadProspects(token: string): Promise<Prospect[]> {
     searchTeamDeals(token, bdrIds),
     getCorgiIndex(),
   ]);
+  const byCompany = corgi?.byCompany ?? null;
   const mapped = deals
-    .map((d) => mapDeal(d, id2name, corgi))
+    .map((d) => mapDeal(d, id2name, byCompany))
     .filter((x): x is Prospect => x !== null);
-  // Collapse duplicate company rows, THEN spread each company's purchased Corgi
-  // policies across the surviving deals (so nothing is double-counted).
-  const rows = distributeCorgiRevenue(dedupeByCompany(mapped), corgi);
+  // Collapse each BDR's duplicate rows for a company down to one.
+  const deduped = dedupeByCompany(mapped);
 
   // Attach the customer/BDR contact dates from HubSpot engagements (calls +
-  // incoming emails). Best-effort and only for the deals we actually show, so a
-  // slow or failed enrichment never blocks the deals themselves.
+  // incoming emails) BEFORE resolving cross-BDR ownership, so the rules of
+  // engagement can see who has the most recent positive contact. Best-effort and
+  // only for the deals we actually show, so a slow/failed enrichment never
+  // blocks the deals themselves.
   const bdrOwnerIds = new Set(bdrIds); // our BDRs' HubSpot user ids
   const engagements = await enrichEngagements(
     token,
-    rows.map((r) => String(r.id)),
+    deduped.map((r) => String(r.id)),
     (ownerId) => Boolean(ownerId) && bdrOwnerIds.has(ownerId!),
   );
-  for (const r of rows) {
+  // Deal id → its contact's email, kept server-side only (never put on a Prospect,
+  // so customer emails never reach the browser). Feeds the Group A email fallback.
+  const emailByDeal = new Map<number, string>();
+  for (const r of deduped) {
     const e: Engagement | undefined = engagements.get(String(r.id));
     r.lastInbound = e?.lastInbound ?? null;
     r.lastBdrOutbound = e?.lastBdrOutbound ?? null;
+    if (e?.contactEmail) emailByDeal.set(r.id, e.contactEmail);
   }
+
+  // Give every company a single owner (rules of engagement), THEN spread each
+  // Django customer's purchased Corgi policies across the surviving deals —
+  // grouping by canonical identity (company name, or email resolved back to the
+  // owning company) so a base deal and its upsell share one pool of policies and
+  // nothing is double-counted. When Corgi is unavailable, keep the HubSpot
+  // stage-based rows as-is.
+  const owned = collapseCrossBdr(deduped);
+  const rows = corgi
+    ? enrichOpenQuotes(
+        resolveCorgiRevenue(owned, corgi, emailByDeal),
+        corgi,
+        emailByDeal,
+      )
+    : owned;
   return rows;
 }
 

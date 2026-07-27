@@ -5,6 +5,7 @@ import {
   STAGES,
   dealHealth,
   daysSinceContact,
+  lastPositiveContact,
   dealValue,
   hubspotUrl,
   effectiveStage,
@@ -68,15 +69,17 @@ type SortKey =
   | "bdr"
   | "ae"
   | "lastInbound"
-  | "lastBdrOutbound"
   | "quote";
 
-// Plain-English tooltips for the two engagement columns, so it's clear what
-// each date means (and the honest limitation on BDR-sent emails).
+// Plain-English tooltip for the engagement column, so it's clear what the date
+// means.
 const INBOUND_HINT =
-  "Last time the customer reached in — an inbound call that connected, or an email received from their contacts in HubSpot.";
-const OUTBOUND_HINT =
-  "Last time a BDR reached out — based on outbound calls the BDR logged in HubSpot. (BDR-sent emails aren't always attributed to a person in HubSpot, so they aren't counted here.)";
+  "Last time the customer reached in — a call that connected, or an email received from their contacts in HubSpot.";
+
+// Stages offered in the Stage filter dropdown. The funnel no longer has a
+// "Qualified" card, so the dropdown must not offer it either — otherwise you
+// could filter to a stage the funnel doesn't show. Mirrors the funnel.
+const FILTER_STAGES = STAGES.filter((s) => s !== "Qualified");
 
 const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "company", label: "Company" },
@@ -84,7 +87,6 @@ const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "bdr", label: "BDR" },
   { key: "ae", label: "AE" },
   { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
-  { key: "lastBdrOutbound", label: "Last Contacted", hint: OUTBOUND_HINT },
   { key: "quote", label: "Quote (Corgi)" },
   { key: null, label: "Notes" },
 ];
@@ -137,21 +139,30 @@ export default function ProspectsTable({
         : rows.filter((r) => effectiveStage(r) === stageFilter);
     if (wonOnly) out = out.filter((r) => r.stage === "Closed Won");
 
+    // Search matches any field a BDR might type to find a deal: company,
+    // contact, BDR, AE, stage, or notes — so "any deal they want to see" is one
+    // box away, on the main screen and inside a single-BDR view alike.
     const q = search.trim().toLowerCase();
     if (q) {
-      out = out.filter(
-        (r) =>
-          r.company.toLowerCase().includes(q) ||
-          r.contact.toLowerCase().includes(q) ||
-          r.notes.toLowerCase().includes(q),
+      out = out.filter((r) =>
+        [r.company, r.contact, r.bdr, r.ae, effectiveStage(r), r.notes]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
       );
     }
 
     const sorted = [...out].sort((a, b) => {
       // The "Quote" column shows the deal's Corgi value (dealValue), so sort by
       // that same figure rather than the raw HubSpot amount.
-      const av = sortKey === "quote" ? dealValue(a) : a[sortKey];
-      const bv = sortKey === "quote" ? dealValue(b) : b[sortKey];
+      const resolve = (p: Prospect) =>
+        sortKey === "quote"
+          ? dealValue(p)
+          : sortKey === "lastInbound"
+            ? lastPositiveContact(p)
+            : p[sortKey];
+      const av = resolve(a);
+      const bv = resolve(b);
       let cmp: number;
       if (typeof av === "number" && typeof bv === "number") {
         cmp = av - bv;
@@ -188,14 +199,14 @@ export default function ProspectsTable({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search company, contact, notes…"
-            className="w-64 rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-emerald-500/40 dark:border-white/15 dark:bg-white/10"
+            placeholder="Search any deal — company, contact, BDR, AE, stage…"
+            className="w-80 rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-emerald-500/40 dark:border-white/15 dark:bg-white/10"
           />
         </div>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-white/50 bg-gradient-to-b from-white/60 to-white/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-16px_rgba(0,0,0,0.18)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.12] dark:from-white/[0.08] dark:to-white/[0.03]">
-        <table className="w-full min-w-[980px] text-left text-sm">
+        <table className="w-full min-w-[860px] text-left text-sm">
           <thead>
             <tr className="border-b border-black/5 text-xs uppercase tracking-wider text-neutral-500 dark:border-white/10 dark:text-neutral-400">
               {COLUMNS.map((c) => (
@@ -219,7 +230,7 @@ export default function ProspectsTable({
                         }`}
                       >
                         <option value="all">All</option>
-                        {STAGES.map((s) => (
+                        {FILTER_STAGES.map((s) => (
                           <option key={s} value={s}>
                             {s}
                           </option>
@@ -269,10 +280,11 @@ export default function ProspectsTable({
                 <td className="px-4 py-3">{r.bdr}</td>
                 <td className="px-4 py-3">{r.ae}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
-                  {r.lastInbound ? prettyDate(r.lastInbound) : <span className="text-neutral-400">—</span>}
-                </td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
-                  {r.lastBdrOutbound ? prettyDate(r.lastBdrOutbound) : <span className="text-neutral-400">—</span>}
+                  {lastPositiveContact(r) ? (
+                    prettyDate(lastPositiveContact(r)!)
+                  ) : (
+                    <span className="text-neutral-400">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 tabular-nums">
                   {dealValue(r) > 0 ? (

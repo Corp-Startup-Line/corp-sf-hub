@@ -9,11 +9,19 @@ import type {
   Kpis,
   Insight,
   InsightTone,
+  Prospect,
+} from "../lib/data";
+import {
+  effectiveStage,
+  daysSinceContact,
+  dealValue,
+  hubspotUrl,
 } from "../lib/data";
 import {
   Card,
   SectionLabel,
   ProgressBar,
+  StageBadge,
   money,
   moneyFull,
   type TintName,
@@ -198,21 +206,26 @@ export function DealValue({
   );
 }
 
-// ---- Quota tracker + confirmed-revenue card ------------------------------
-export function QuotaAndRevenue({
+// ---- Quota tracker -------------------------------------------------------
+// One card, full width. By default it shows ALL-TIME progress against the
+// all-time target (BDR $600k / team $3.6M); pick a month in the filter and it
+// narrows to "This Month" against the monthly target. The window label follows
+// whichever view is in play.
+export function QuotaCard({
   quota,
-  confirmed,
   perBdr,
 }: {
   quota: QuotaProgress;
-  confirmed: number;
   perBdr: boolean;
 }) {
   return (
-    <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <Card className="lg:col-span-2">
+    <section className="mb-10">
+      <Card>
         <div className="mb-2 flex items-baseline justify-between">
-          <SectionLabel>{perBdr ? "BDR Progress" : "Team Progress"}</SectionLabel>
+          <SectionLabel>
+            {perBdr ? "BDR Progress" : "Team Progress"} ·{" "}
+            {quota.allTime ? "All Time" : "This Month"}
+          </SectionLabel>
           <span className="text-2xl font-medium">{quota.pct}%</span>
         </div>
         <ProgressBar pct={quota.pct} />
@@ -221,14 +234,81 @@ export function QuotaAndRevenue({
           <span>Target {money(quota.target)}</span>
         </div>
       </Card>
+    </section>
+  );
+}
 
-      <Card tint="emerald">
-        <SectionLabel>Confirmed Revenue</SectionLabel>
-        <div className="text-3xl font-medium text-emerald-600 dark:text-emerald-400">
-          {money(confirmed)}
+// ---- At-risk deals: the per-BDR "chase these now" list -------------------
+// Open deals where the customer hasn't made positive contact in 3+ days (or
+// ever). This is the point of the single-BDR view: surface deals going stale
+// or at risk of being poached before they slip away. Worst-first.
+const AT_RISK_LIMIT = 12; // keep it a focused chase-list, not a wall of cards
+
+export function AtRiskDeals({ deals }: { deals: Prospect[] }) {
+  const shown = deals.slice(0, AT_RISK_LIMIT);
+  return (
+    <section className="mb-10">
+      <div className="mb-4 flex items-baseline justify-between gap-3">
+        <SectionLabel>At-Risk Deals · No positive contact in 3+ days</SectionLabel>
+        {deals.length > 0 && (
+          <span className="text-sm text-neutral-500 dark:text-neutral-400">
+            {deals.length} to chase
+            {deals.length > AT_RISK_LIMIT ? ` · showing top ${AT_RISK_LIMIT}` : ""}
+          </span>
+        )}
+      </div>
+      {deals.length === 0 ? (
+        <Card tint="emerald">
+          <div className="flex items-center gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+              ✓
+            </span>
+            <p className="text-sm text-neutral-700 dark:text-neutral-200">
+              All caught up — every open deal has had positive contact in the last 3 days.
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((d) => {
+            const days = daysSinceContact(d);
+            const risk = days === null || days >= 4;
+            return (
+              <Card key={d.id} tint={risk ? "rose" : "amber"}>
+                <div className="flex items-start justify-between gap-2">
+                  <a
+                    href={hubspotUrl(d)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium underline-offset-2 transition hover:text-corgi-ginger hover:underline"
+                  >
+                    {d.company}
+                  </a>
+                  <StageBadge stage={effectiveStage(d)} />
+                </div>
+                <div className="mt-3 flex items-baseline justify-between">
+                  <span
+                    className={`text-sm font-medium ${
+                      risk
+                        ? "text-rose-600 dark:text-rose-400"
+                        : "text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {days === null
+                      ? "No positive contact yet"
+                      : `${days} days quiet`}
+                  </span>
+                  {dealValue(d) > 0 && (
+                    <span className="text-sm tabular-nums text-neutral-500 dark:text-neutral-400">
+                      {moneyFull(dealValue(d))}
+                    </span>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
-        <div className="mt-2 text-xs text-neutral-400">via Corgi — purchased quotes</div>
-      </Card>
+      )}
     </section>
   );
 }

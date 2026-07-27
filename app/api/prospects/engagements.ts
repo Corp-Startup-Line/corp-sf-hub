@@ -220,6 +220,8 @@ export type Engagement = {
   lastInbound: string | null; // last POSITIVE CONTACT: a connected call (either
   // direction) or an incoming email from the customer's contacts
   lastBdrOutbound: string | null; // last outbound call attempt by one of our BDRs
+  contactEmail: string | null; // the deal's primary contact email — used ONLY on
+  // the server to match a deal to a Corgi quote by buyer; never sent to the browser
 };
 
 // Attach engagement dates to every deal id. `isBdrOwner` decides whether a
@@ -246,6 +248,13 @@ export async function enrichEngagements(
     allContactIds,
   );
 
+  // Each contact's own email address (the person's email, not the email
+  // engagement records above). Used only to match a deal to a Corgi quote by
+  // buyer when the company name doesn't line up; never leaves the server.
+  const contactAddress = await objBatch(token, "contacts", allContactIds, [
+    "email",
+  ]);
+
   // Read the properties we actually need off the calls and emails.
   const allCallIds = uniq([...dealCalls.values()].flat());
   const allEmailIds = uniq([...contactEmails.values()].flat());
@@ -267,6 +276,16 @@ export async function enrichEngagements(
   for (const dealId of dealIds) {
     let lastInbound: string | null = null;
     let lastBdrOutbound: string | null = null;
+
+    // First contact on this deal that has an email address on file.
+    let contactEmail: string | null = null;
+    for (const cid of dealContacts.get(dealId) ?? []) {
+      const email = contactAddress.get(cid)?.email;
+      if (email && email.trim()) {
+        contactEmail = email.trim();
+        break;
+      }
+    }
 
     // Calls give us direction, the caller, and whether it connected.
     for (const callId of dealCalls.get(dealId) ?? []) {
@@ -305,6 +324,7 @@ export async function enrichEngagements(
     out.set(dealId, {
       lastInbound: toDay(lastInbound),
       lastBdrOutbound: toDay(lastBdrOutbound),
+      contactEmail,
     });
   }
   return out;

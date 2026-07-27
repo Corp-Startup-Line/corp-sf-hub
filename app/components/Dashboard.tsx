@@ -11,6 +11,7 @@ import {
   computeKpis,
   computeMonthlyTrend,
   computeInsights,
+  atRiskDeals,
   DEFAULT_FILTERS,
   type Filters,
   type Stage,
@@ -20,7 +21,7 @@ import { Skeleton } from "../lib/ui";
 import Header from "./Header";
 import FilterBar from "./FilterBar";
 import ManageBdrs from "./ManageBdrs";
-import { KpiStrip, InsightsPanel, Funnel, DealValue, QuotaAndRevenue, RepCards } from "./Sections";
+import { KpiStrip, InsightsPanel, Funnel, DealValue, QuotaCard, AtRiskDeals, RepCards } from "./Sections";
 import { WonTrend, RepLeaderboard } from "./Charts";
 import ProspectsTable from "./ProspectsTable";
 
@@ -116,6 +117,7 @@ export default function Dashboard() {
   const kpis = useMemo(() => computeKpis(rows), [rows]);
   const trend = useMemo(() => computeMonthlyTrend(rows), [rows]);
   const insights = useMemo(() => computeInsights(rows), [rows]);
+  const atRisk = useMemo(() => atRiskDeals(rows), [rows]);
 
   // Which rep (if any) is selected for the current team tab.
   const selectedRep = team === "bdr" ? filters.bdr : filters.ae;
@@ -170,32 +172,31 @@ export default function Dashboard() {
             onToggleSort={() => setSortByWon((v) => !v)}
             onToggleWonOnly={() => setWonOnly((v) => !v)}
           />
-          <QuotaAndRevenue
-            quota={quota}
-            confirmed={values.confirmed}
-            perBdr={filters.bdr !== "all"}
-          />
+          <QuotaCard quota={quota} perBdr={filters.bdr !== "all"} />
 
           {/* The leaderboard and per-rep breakdown are for comparing reps to
               each other, so they only make sense when viewing the whole team.
-              Once a single BDR is in focus, hide them and let the Won-value
-              trend (their own numbers) take the full width. */}
+              Once a single BDR is in focus, hide them, surface that BDR's
+              at-risk deals, and let the Won-value trend take the full width. */}
           {singleBdr ? (
-            <section className="mb-10">
-              <WonTrend data={trend} />
-            </section>
+            <>
+              <AtRiskDeals deals={atRisk} />
+              <section className="mb-10 max-w-3xl">
+                <WonTrend data={trend} />
+              </section>
+            </>
           ) : (
             <>
               {/* The leaderboard is a BDR-quota comparison, so it only shows on
                   the BDR tab. On the AE tab it's hidden and the Won-value trend
                   takes the full width. */}
               {team === "bdr" ? (
-                <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <section className="mb-10 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
                   <WonTrend data={trend} />
                   <RepLeaderboard stats={repStats} teamLabel="BDR" />
                 </section>
               ) : (
-                <section className="mb-10">
+                <section className="mb-10 max-w-3xl">
                   <WonTrend data={trend} />
                 </section>
               )}
