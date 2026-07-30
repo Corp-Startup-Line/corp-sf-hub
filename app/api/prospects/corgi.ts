@@ -16,19 +16,18 @@ const MAX_QUOTES = 40_000; // safety cap so we can never loop forever
 const CONCURRENCY = 8; // parallel page fetches (Corgi throttles above this)
 const CACHE_TTL_MS = 10 * 60 * 1000; // reuse the pulled quotes for 10 minutes
 
-// One PURCHASED policy from the /policies endpoint. Django's /policies feed is
-// the source of truth for confirmed revenue: unlike /quotes (which often marks a
-// bought policy "purchased" but leaves its premium at $0), every policy here
-// carries its REAL annual premium and the REAL date it was bought
-// (`purchased_at`). Each record is one distinct sale (unique policy_number), so
-// there's no de-duping to do. `keys` are every handle we can match a HubSpot deal
-// on — the insured legal name, the organization name, and the buyer's email, all
-// normalised — so a deal found by ANY of them can claim this policy.
+// One distinct confirmed-revenue unit credited to a Closed Won deal. Its dollar
+// figure comes from the PURCHASED QUOTE's annual_premium (the exact base premium
+// Django's UI shows for a sale) — NOT from summing the /policies per-line
+// premiums, which don't add up to the quote total and double-count re-issued
+// bundles. The purchase month is taken from the matching /policies purchased_at.
+// `keys` are every handle we can match a HubSpot deal on — the company legal name
+// and the buyer's email, normalised — so a deal found by ANY of them can claim it.
 export type CorgiPolicy = {
-  id: string; // policy_number — the unique sale, so each is counted once
-  premium: number; // the policy's annual premium (USD)
-  month: string; // "YYYY-MM" taken from purchased_at
-  keys: string[]; // normalised legal name / org name / email handles
+  id: string; // synthetic "companyKey|premium|idx" — one distinct sale unit
+  premium: number; // the purchased quote's annual premium (USD)
+  month: string; // "YYYY-MM" taken from the policy's purchased_at
+  keys: string[]; // normalised legal name / email handles
   nameKeys: string[]; // just the name-derived handles (a strong, non-shared match)
 };
 
@@ -76,6 +75,41 @@ function isPurchased(status: string | null): boolean {
   if (!status) return false;
   const s = status.toLowerCase();
   return s === "purchased" || s === "active" || s === "bound" || s === "issued";
+}
+
+// A quote that is a REAL, live quote the BDR has raised — i.e. it counts as
+// "Quoted" on the dashboard. "quoted" is the finished figure; "needs_review" is a
+// genuine quote parked for the underwriting team (Django sometimes leaves its
+// premium at $0 until they finish, but it's still a real quote); "submitted" is
+// on its way. A "draft" is an unfinished form (often $0, junk test rows) — NOT a
+// real quote, so it never promotes a deal to Quoted. "purchased" is handled
+// separately as confirmed revenue.
+function isRealQuoteStatus(status: string | null): boolean {
+  if (!status) return false;
+  const s = status.toLowerCase();
+  return s === "quoted" || s === "needs_review" || s === "submitted";
+}
+
+// The domain part of an email ("karan@trycosmos.ai" → "trycosmos.ai"). Empty
+// when there's no "@". Used as a company handle when the buyer's personal email
+// differs but their company domain is the same across HubSpot and Django.
+export function emailDomain(email: string): string {
+  const at = email.lastIndexOf("@");
+  return at >= 0 ? email.slice(at + 1).trim() : "";
+}
+
+// Free / shared email providers — a match on one of these means nothing (two
+// unrelated companies both using gmail aren't the same buyer), so domains like
+// these are never used as a company handle.
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "hotmail.com",
+  "outlook.com", "live.com", "msn.com", "icloud.com", "me.com", "mac.com",
+  "aol.com", "proton.me", "protonmail.com", "gmx.com", "mail.com",
+  "hey.com", "pm.me", "zoho.com", "yandex.com", "fastmail.com",
+]);
+
+export function isPublicDomain(domain: string): boolean {
+  return !domain || PUBLIC_EMAIL_DOMAINS.has(domain);
 }
 
 // One page request. Returns the parsed rows, the server's reported total, and
@@ -241,6 +275,10 @@ function indexBy(
     const key = keyOf(q);
     if (!key) continue;
     const status: string | null = q?.status ?? null;
+    // Only real quotes and purchases count. A draft (unfinished $0 form, often a
+    // junk/test row) is ignored entirely, so a company with nothing but drafts
+    // gets no entry and is never wrongly flagged "Quoted".
+    if (!isPurchased(status) && !isRealQuoteStatus(status)) continue;
     const premium = toCents(Number(q?.annual_premium) || 0);
     const coverage: string | null =
       typeof q?.coverage === "string" ? q.coverage : null;
@@ -293,46 +331,168 @@ function indexBy(
 export type CorgiIndex = {
   byCompany: Map<string, CorgiCompany>;
   byEmail: Map<string, CorgiCompany>;
+  // Quotes aggregated by the buyer's EMAIL DOMAIN (company domain, public
+  // providers excluded). Lets an open deal find its Django quote when the exact
+  // buyer email differs but the company domain is the same — e.g. a HubSpot
+  // contact at trycosmos.ai matching a Django quote from another trycosmos.ai
+  // address. Display-only (flags "has a quote" + a quoted figure); never revenue.
+  byDomain: Map<string, CorgiCompany>;
   emailCompanyKeys: Map<string, Set<string>>;
-  // Every distinct PURCHASED policy (from /policies), the source of truth for
-  // confirmed revenue and its real purchase date. The deals route assigns each
-  // policy to exactly ONE won deal (so no sale is ever counted twice) and dates
-  // that deal by the policy's purchased_at month, instead of trusting the
-  // /quotes feed (which zeroes purchased premiums) or HubSpot's close date.
+  // Every distinct confirmed-revenue unit (purchased-quote premium + real
+  // purchase date), the source of truth for Closed Won money. The deals route
+  // assigns each unit to exactly ONE won deal (so no sale is counted twice) and
+  // dates that deal by the unit's purchased_at month, instead of HubSpot's
+  // migration-corrupted close date.
   policies: CorgiPolicy[];
 };
 
-// Reduce the raw /policies feed to the list of distinct purchased policies we
-// credit as revenue. Each record is already one unique sale (policy_number), so
-// we only tag it with the handles a HubSpot deal can be matched on — the insured
-// legal name, the organization name (both "strong" name handles), and the
-// buyer's email — and drop anything with no premium or no purchase date.
-export function buildPolicies(policies: any[]): CorgiPolicy[] {
-  const out: CorgiPolicy[] = [];
+// Build the revenue units the dashboard credits to Closed Won deals. The dollar
+// figure is the PURCHASED QUOTE's annual_premium — the exact number Django's UI
+// shows as a sale's base premium (e.g. Izuma $9,253.63, Mainstay $7,469.05). The
+// /policies feed is used ONLY for the real purchase DATE (purchased_at): its
+// per-line `premium` values don't sum to the quote total, and Django lists a
+// re-issued bundle's old + new lines both as "active", so summing them
+// double-counted the same sale. The rare company whose purchased quote is
+// missing or $0 falls back to its policy lines (deduped, so still counted once).
+type RevItem = {
+  premium: number;
+  coverage: string | null;
+  nameKeys: string[]; // strong name handles (insured/org/entity legal name)
+  email: string; // exact buyer email (domain deliberately never used — shared
+  // broker inboxes span unrelated companies, e.g. jeremy@waxregistry.com)
+  month: string; // "YYYY-MM"
+};
+
+// Earliest purchase month per company handle (name or email), read from
+// /policies — the only feed carrying a real purchased_at date.
+function buildMonthMap(policies: any[]): Map<string, string> {
+  const m = new Map<string, string>();
   for (const p of policies) {
-    // A cancelled policy is churned, not won revenue — and Django often leaves
-    // the ORIGINAL (later re-bought) policy sitting as "cancelled" next to its
-    // active replacement, so counting it double-counts the same sale. Skip it.
     if (String(p?.status ?? "").toLowerCase() === "cancelled") continue;
     const month =
       typeof p?.purchased_at === "string" ? p.purchased_at.slice(0, 7) : "";
-    if (!month) continue; // no purchase date → can't recognise it
+    if (!month) continue;
+    const keys = [
+      normalizeCompany(p?.insured_legal_name ?? ""),
+      normalizeCompany(p?.organization_name ?? ""),
+      normalizeEmail(p?.customer_email),
+    ].filter(Boolean);
+    for (const k of keys) {
+      const prev = m.get(k);
+      if (!prev || month < prev) m.set(k, month); // keep the earliest
+    }
+  }
+  return m;
+}
+
+function lookupMonth(map: Map<string, string>, keys: string[]): string {
+  for (const k of keys) {
+    const v = k ? map.get(k) : undefined;
+    if (v) return v;
+  }
+  return "";
+}
+
+// Group a company's revenue items (purchased quotes, or fallback policy lines)
+// by company, collapse revised/duplicate coverages via dedupePurchased (so a
+// re-bought bundle counts once) while summing genuinely distinct coverages, and
+// emit one CorgiPolicy-shaped unit per surviving premium. Grouped by the company
+// NAME key (falling back to email) — the same handle deals are matched on later.
+function groupUnits(items: RevItem[]): CorgiPolicy[] {
+  const byKey = new Map<string, RevItem[]>();
+  for (const it of items) {
+    const gk = it.nameKeys[0] || it.email;
+    if (!gk) continue;
+    const arr = byKey.get(gk);
+    if (arr) arr.push(it);
+    else byKey.set(gk, [it]);
+  }
+  const out: CorgiPolicy[] = [];
+  for (const [gk, arr] of byKey) {
+    const deduped = dedupePurchased(
+      arr.map((i) => ({ premium: i.premium, coverage: i.coverage })),
+    );
+    if (deduped.length === 0) continue;
+    const nameKeys = [...new Set(arr.flatMap((i) => i.nameKeys))].filter(Boolean);
+    const emails = [...new Set(arr.map((i) => i.email).filter(Boolean))];
+    const month = arr.map((i) => i.month).filter(Boolean).sort()[0] || "";
+    deduped.forEach((prem, idx) =>
+      out.push({
+        id: `${gk}|${prem}|${idx}`,
+        premium: prem,
+        month,
+        keys: [...nameKeys, ...emails],
+        nameKeys,
+      }),
+    );
+  }
+  return out;
+}
+
+// The revenue units, the single source of truth for Closed Won money. Primary
+// source is the PURCHASED QUOTE annual_premium (matches Django's UI); /policies
+// supplies the purchase date and covers the rare company whose quote is $0.
+export function buildPurchasedQuotes(
+  quotes: any[],
+  policies: any[],
+): CorgiPolicy[] {
+  const monthByKey = buildMonthMap(policies);
+
+  // 1) Purchased quotes → the real base premium per company.
+  const quoteItems: RevItem[] = [];
+  const covered = new Set<string>(); // company handles that have a purchased quote
+  for (const q of quotes) {
+    if (!isPurchased(q?.status ?? null)) continue;
+    const premium = toCents(Number(q?.annual_premium) || 0);
+    if (premium <= 0) continue; // $0 purchased quote → left to the policy fallback
+    const nameKey = normalizeCompany(
+      typeof q?.entity_legal_name === "string" ? q.entity_legal_name : "",
+    );
+    const email = normalizeEmail(q?.customer_email);
+    if (!nameKey && !email) continue;
+    if (nameKey) covered.add(nameKey);
+    if (email) covered.add(email);
+    const month =
+      lookupMonth(monthByKey, [nameKey, email]) ||
+      (typeof q?.created_at === "string" ? q.created_at.slice(0, 7) : "");
+    quoteItems.push({
+      premium,
+      coverage: typeof q?.coverage === "string" ? q.coverage : null,
+      nameKeys: nameKey ? [nameKey] : [],
+      email,
+      month,
+    });
+  }
+
+  // 2) Fallback: policy lines, but ONLY for companies with NO purchased quote
+  //    (so the correct quote total is never overridden or double-counted).
+  const polItems: RevItem[] = [];
+  for (const p of policies) {
+    if (String(p?.status ?? "").toLowerCase() === "cancelled") continue;
+    const month =
+      typeof p?.purchased_at === "string" ? p.purchased_at.slice(0, 7) : "";
+    if (!month) continue;
     const premium = toCents(Number(p?.premium) || 0);
-    if (premium <= 0) continue; // a $0 policy adds no revenue
+    if (premium <= 0) continue;
     const nameKeys = [
       normalizeCompany(p?.insured_legal_name ?? ""),
       normalizeCompany(p?.organization_name ?? ""),
     ].filter((k, i, a) => k && a.indexOf(k) === i);
     const email = normalizeEmail(p?.customer_email);
-    const keys = email ? [...nameKeys, email] : [...nameKeys];
-    if (keys.length === 0) continue; // nothing to match a deal on
-    const id =
-      typeof p?.policy_number === "string" && p.policy_number
-        ? p.policy_number
-        : `${keys[0]}|${premium}|${month}`;
-    out.push({ id, premium, month, keys, nameKeys });
+    if (nameKeys.length === 0 && !email) continue;
+    if (nameKeys.some((k) => covered.has(k)) || (email && covered.has(email))) {
+      continue; // this company already has a purchased-quote figure
+    }
+    polItems.push({
+      premium,
+      coverage: typeof p?.coverage_type === "string" ? p.coverage_type : null,
+      nameKeys,
+      email,
+      month,
+    });
   }
-  return out;
+
+  return [...groupUnits(quoteItems), ...groupUnits(polItems)];
 }
 
 // Build the company index, the email index, and the email→company-name map in
@@ -344,6 +504,10 @@ export function buildCorgiIndex(quotes: any[], policies: any[]): CorgiIndex {
     ),
   );
   const byEmail = indexBy(quotes, (q) => normalizeEmail(q?.customer_email));
+  const byDomain = indexBy(quotes, (q) => {
+    const dom = emailDomain(normalizeEmail(q?.customer_email));
+    return isPublicDomain(dom) ? "" : dom; // public/empty domains → no key
+  });
 
   const emailCompanyKeys = new Map<string, Set<string>>();
   for (const q of quotes) {
@@ -358,7 +522,13 @@ export function buildCorgiIndex(quotes: any[], policies: any[]): CorgiIndex {
     else emailCompanyKeys.set(emailKey, new Set([companyKey]));
   }
 
-  return { byCompany, byEmail, emailCompanyKeys, policies: buildPolicies(policies) };
+  return {
+    byCompany,
+    byEmail,
+    byDomain,
+    emailCompanyKeys,
+    policies: buildPurchasedQuotes(quotes, policies),
+  };
 }
 
 // In-memory index shared across requests on this server instance, plus a
@@ -396,7 +566,11 @@ export async function getCorgiIndex(): Promise<CorgiIndex | null> {
   return inFlight;
 }
 
-// Find a company's Corgi record by name (null when there's no match).
+// Find a company's Corgi record by EXACT normalised name (null when there's no
+// match). This is the match that drives confirmed revenue and cross-BDR deal
+// ownership, so it stays strict on purpose — a looser match here could hand one
+// BDR's purchased policy to another's deal. Fuzzy name matching for DISPLAY-only
+// quote flags on open deals lives in matchCompanyLoose.
 export function matchCompany(
   index: Map<string, CorgiCompany>,
   company: string,
@@ -404,4 +578,32 @@ export function matchCompany(
   const key = normalizeCompany(company);
   if (!key) return null;
   return index.get(key) ?? null;
+}
+
+// A looser name match for OPEN deals only (never revenue/ownership). Tries the
+// exact name first, then a UNIQUE prefix match: HubSpot often holds a short brand
+// ("Anomaly", "Cloudbreak Energy") while Django files the full legal name
+// ("Anomaly Innovations Inc.", "Cloudbreak Energy Partners LLC"). If exactly one
+// Django company's name starts with the deal's name it's that company; if several
+// do it's ambiguous and we refuse to guess (so two firms are never merged). Short
+// deal names (< 5 chars) are too generic to prefix-match and only match exactly.
+export function matchCompanyLoose(
+  index: Map<string, CorgiCompany>,
+  company: string,
+): CorgiCompany | null {
+  const key = normalizeCompany(company);
+  if (!key) return null;
+  const exact = index.get(key);
+  if (exact) return exact;
+  if (key.length < 5) return null; // too short/generic to prefix-match safely
+  let hit: CorgiCompany | null = null;
+  let count = 0;
+  for (const [k, v] of index) {
+    if (k !== key && k.startsWith(key)) {
+      count++;
+      if (count > 1) return null; // more than one → ambiguous, don't guess
+      hit = v;
+    }
+  }
+  return count === 1 ? hit : null;
 }

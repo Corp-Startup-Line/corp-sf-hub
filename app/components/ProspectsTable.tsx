@@ -14,6 +14,7 @@ import {
   type Stage,
 } from "../lib/data";
 import { SectionLabel, StageBadge, moneyFull, prettyDate } from "../lib/ui";
+import { prettyMonth } from "../lib/month";
 
 // Traffic-light styling for a row, by deal health. Kept restrained: a thin
 // coloured left edge + a whisper-faint tint, never a loud fill. The tint goes
@@ -76,6 +77,10 @@ type SortKey =
 const INBOUND_HINT =
   "Last time the customer reached in — a call that connected, or an email received from their contacts in HubSpot.";
 
+// Plain-English tooltip for the rep-outbound column.
+const OUTBOUND_HINT =
+  "Last time the rep reached out to the customer — any logged activity (call, email, meeting/invite), from HubSpot's Last Contacted stamp.";
+
 // Stages offered in the Stage filter dropdown. The funnel no longer has a
 // "Qualified" card, so the dropdown must not offer it either — otherwise you
 // could filter to a stage the funnel doesn't show. Mirrors the funnel.
@@ -88,7 +93,7 @@ const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "ae", label: "AE" },
   { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
   { key: "quote", label: "Quote (Corgi)" },
-  { key: null, label: "Notes" },
+  { key: null, label: "Last Rep Contact", hint: OUTBOUND_HINT },
 ];
 
 export default function ProspectsTable({
@@ -105,6 +110,10 @@ export default function ProspectsTable({
   onStageFilter: (s: Stage | "all") => void;
 }) {
   const [search, setSearch] = useState("");
+  // A month filter LOCAL to this table (like the search box), so you can narrow
+  // the deal list to one month without touching the whole-dashboard Month filter
+  // up top (which also reshapes the KPIs, funnel and charts). "all" = every month.
+  const [monthFilter, setMonthFilter] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("company");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -128,7 +137,17 @@ export default function ProspectsTable({
     }
   }
 
-  // Filter (stage + won-only + search), then sort. useMemo = only recompute when inputs change.
+  // The months present in these deals, newest first, for the Month dropdown.
+  // Built from the rows themselves so only months that actually have deals show.
+  const monthOptions = useMemo(
+    () =>
+      Array.from(new Set(rows.map((r) => r.month).filter(Boolean)))
+        .sort()
+        .reverse() as string[],
+    [rows],
+  );
+
+  // Filter (stage + month + won-only + search), then sort. useMemo = only recompute when inputs change.
   const processed = useMemo(() => {
     // Match by EFFECTIVE stage — the same Corgi-quote-aware definition the
     // funnel cards use — so clicking any card (including "Quoted") shows exactly
@@ -138,6 +157,7 @@ export default function ProspectsTable({
         ? rows
         : rows.filter((r) => effectiveStage(r) === stageFilter);
     if (wonOnly) out = out.filter((r) => r.stage === "Closed Won");
+    if (monthFilter !== "all") out = out.filter((r) => r.month === monthFilter);
 
     // Search matches any field a BDR might type to find a deal: company,
     // contact, BDR, AE, stage, or notes — so "any deal they want to see" is one
@@ -172,7 +192,7 @@ export default function ProspectsTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [rows, wonOnly, stageFilter, search, sortKey, sortDir]);
+  }, [rows, wonOnly, stageFilter, monthFilter, search, sortKey, sortDir]);
 
   // Pagination maths.
   const totalPages = Math.max(1, Math.ceil(processed.length / pageSize));
@@ -181,7 +201,7 @@ export default function ProspectsTable({
   const pageRows = processed.slice(start, start + pageSize);
 
   // Whenever the underlying data or page size changes, go back to page 1.
-  useEffect(() => setPage(1), [rows, wonOnly, stageFilter, search, pageSize]);
+  useEffect(() => setPage(1), [rows, wonOnly, stageFilter, monthFilter, search, pageSize]);
 
   return (
     <section className="mb-10">
@@ -196,6 +216,26 @@ export default function ProspectsTable({
               </span>
             ))}
           </div>
+          <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+            Month
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              title="Show only deals from this month"
+              className={`cursor-pointer rounded-xl border px-3 py-2 text-sm normal-case tracking-normal outline-none transition focus:ring-2 focus:ring-corgi-ginger/40 dark:bg-white/10 ${
+                monthFilter === "all"
+                  ? "border-black/10 bg-white/70 text-neutral-600 dark:border-white/15 dark:text-neutral-300"
+                  : "border-corgi-ginger/40 bg-corgi-ginger/10 text-corgi-ginger"
+              }`}
+            >
+              <option value="all">All Time</option>
+              {monthOptions.map((m) => (
+                <option key={m} value={m}>
+                  {prettyMonth(m)}
+                </option>
+              ))}
+            </select>
+          </label>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -293,8 +333,12 @@ export default function ProspectsTable({
                     <span className="text-neutral-400">—</span>
                   )}
                 </td>
-                <td className="max-w-[220px] truncate px-4 py-3 text-neutral-500 dark:text-neutral-400">
-                  {r.notes}
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
+                  {r.lastContact ? (
+                    prettyDate(r.lastContact)
+                  ) : (
+                    <span className="text-neutral-400">—</span>
+                  )}
                 </td>
               </tr>
               );

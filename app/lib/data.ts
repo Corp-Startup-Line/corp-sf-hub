@@ -227,10 +227,43 @@ export async function getProspects(): Promise<Prospect[]> {
     const res = await fetch("/api/prospects", { cache: "no-store" });
     if (!res.ok) throw new Error(`prospects API returned ${res.status}`);
     const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) return data as Prospect[];
-    return PROSPECTS;
+    if (Array.isArray(data) && data.length > 0) {
+      saveCachedProspects(data as Prospect[]); // remember for an instant next load
+      return data as Prospect[];
+    }
+    return loadCachedProspects() ?? PROSPECTS;
   } catch {
-    return PROSPECTS;
+    // Network/route failure → the last good payload we saved, else the demo rows.
+    return loadCachedProspects() ?? PROSPECTS;
+  }
+}
+
+// The live pull is slow on a cold serverless instance (Django has to be paged in
+// full, ~30-60s). To keep the dashboard feeling instant we stash the last good
+// payload in the browser and render it immediately on the next visit while a
+// fresh pull runs in the background (see Dashboard's load()). This is display
+// cache only — it never changes the numbers, just when they first appear.
+const PROSPECTS_CACHE_KEY = "corgi-prospects-cache";
+
+export function loadCachedProspects(): Prospect[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PROSPECTS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed as Prospect[];
+  } catch {
+    // ignore malformed / oversized storage and fall through to null
+  }
+  return null;
+}
+
+export function saveCachedProspects(rows: Prospect[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PROSPECTS_CACHE_KEY, JSON.stringify(rows));
+  } catch {
+    // storage full / disabled — caching is best-effort, so ignore
   }
 }
 
@@ -498,6 +531,14 @@ function daysBetween(from: string, to: string): number {
   return Math.floor(ms / 86_400_000);
 }
 
+// Today's real date ("YYYY-MM-DD"). Deal-health colours must be measured against
+// the actual day the dashboard is viewed — the frozen TODAY constant above is
+// only for the sample rows, and using it on live data made genuinely stale deals
+// (contacted weeks ago) read as "3 days" and glow amber instead of red.
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // The date of a deal's last POSITIVE contact. On live deals this is lastInbound
 // (a call that connected in either direction, or an email the customer sent us);
 // the sample rows only carry lastContact, so we fall back to that. This is the
@@ -508,7 +549,7 @@ export function lastPositiveContact(p: Prospect): string | null {
 }
 
 // Days since the last positive contact — null if none has ever been logged.
-export function daysSinceContact(p: Prospect, today: string = TODAY): number | null {
+export function daysSinceContact(p: Prospect, today: string = todayISO()): number | null {
   const last = lastPositiveContact(p);
   return last === null ? null : daysBetween(last, today);
 }
@@ -520,7 +561,7 @@ export function daysSinceContact(p: Prospect, today: string = TODAY): number | n
 //   risk    – no contact past the threshold, or ghosting (red)
 //   none    – no contact logged yet (fresh prospect, neutral)
 // Logging a newer lastContact date automatically pulls it back to "safe".
-export function dealHealth(p: Prospect, today: string = TODAY): DealHealth {
+export function dealHealth(p: Prospect, today: string = todayISO()): DealHealth {
   if (p.stage === "Closed Won") return "won";
   if (p.stage === "Ghosting" || p.stage === "Closed Lost") return "risk";
   const d = daysSinceContact(p, today);
@@ -540,7 +581,7 @@ export function dealHealth(p: Prospect, today: string = TODAY): DealHealth {
 // it's been silent (longest first); deals that never had positive contact rank
 // last, because a customer who engaged and then went dark is the more urgent
 // save than one that was never worked.
-export function atRiskDeals(rows: Prospect[], today: string = TODAY): Prospect[] {
+export function atRiskDeals(rows: Prospect[], today: string = todayISO()): Prospect[] {
   const openStages: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
   const rank = (p: Prospect) => {
     const d = daysSinceContact(p, today);
@@ -573,12 +614,15 @@ function sum(rows: Prospect[], key: "quote"): number {
 // HubSpot deal amount. This keeps every revenue figure on the dashboard —
 // per-BDR, per-AE, leaderboard, trend, confirmed — on the same Corgi basis.
 export function dealValue(p: Prospect): number {
-  // Closed/Corgi-owned deal → the confirmed purchased premium (0 = no policy).
-  if (p.corgiRevenueResolved) return p.corgiPremium || 0;
-  // A Closed Won deal with no resolved Corgi policy → the HubSpot amount only. A
-  // QUOTED premium is NOT revenue, so a won deal must never fall back to it (that
-  // used to overstate wins whose purchased policy carried a $0 premium in Corgi).
-  if (p.stage === "Closed Won") return p.corgiPremium || p.quote || 0;
+  // A Closed Won deal is worth the price booked the DAY IT CLOSED — the HubSpot
+  // deal amount, which is Django's premium stamped onto the deal at the moment of
+  // sale. This is the figure the team's real per-BDR revenue reconciles to, to the
+  // dollar. (Re-deriving it from the LIVE Django feed understated every rep: ~1 in
+  // 5 sales are filed under a legal name HubSpot never stores and silently
+  // dropped to $0, and post-sale re-quotes drift the live premium away from what
+  // was actually booked.) The Django feed is still used elsewhere for the real
+  // purchase MONTH and the "quoted" badges — only this dollar figure is at-close.
+  if (p.stage === "Closed Won") return p.quote || 0;
   // Open deal → its pipeline value: the Corgi QUOTED premium (what we quoted the
   // customer) is the source of truth, falling back to the HubSpot amount only
   // when Corgi has no quote. This feeds the Pipeline KPI and the deal finder's

@@ -9,10 +9,13 @@
 // getProspects() in data.ts.
 // ============================================================================
 
+import { unstable_cache } from "next/cache";
 import type { Prospect, Stage } from "../../lib/data";
 import {
+  emailDomain,
   getCorgiIndex,
   matchCompany,
+  matchCompanyLoose,
   normalizeCompany,
   normalizeEmail,
   type CorgiCompany,
@@ -30,9 +33,10 @@ export const maxDuration = 60;
 
 const HUBSPOT_BASE = "https://api.hubapi.com";
 
-// How long to reuse a fetched result before going back to HubSpot. Keeps the
-// dashboard fast on repeat loads without showing badly stale numbers.
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// How long (seconds) to reuse a fetched result before going back to HubSpot +
+// Corgi. Keeps the dashboard fast on repeat loads without showing badly stale
+// numbers. Used by unstable_cache below (Next's persistent Data Cache).
+const REVALIDATE_SECONDS = 5 * 60; // 5 minutes
 
 // YOUR BDR team — only deals whose HubSpot "BDR" field is one of these people
 // show in the dashboard. Everyone else's / company-wide deals are ignored.
@@ -278,6 +282,38 @@ const OWNERSHIP_OVERRIDES: Record<string, string> = {
   [normalizeCompany("Mainstay Digital")]: "Carwyn Chiramel",
 };
 
+// Human-confirmed identity aliases: a HubSpot deal named on the LEFT is the same
+// customer as the Django legal entity on the RIGHT. HubSpot deals use nicknames
+// ("ChatLabs") while Django files the full legal name ("ChatLabs Technology Inc"),
+// and there's no shared ID between the two systems — so when the deal has no
+// contact email to bridge them (the reliable link), an exact/domain match is
+// impossible and the sale would show $0. Each pair below was verified by hand
+// against Django's /policies feed (real bought policy + premium). This is the ONLY
+// place fuzzy names are trusted, and only because a human signed off on each one —
+// so it can never silently merge two different companies the way prefix-guessing
+// did. To link a new one: add its contact email in HubSpot (auto-links by domain)
+// or add a confirmed pair here. Left = the HubSpot deal name, right = the exact
+// Django insured legal name.
+const COMPANY_ALIAS_PAIRS: [string, string][] = [
+  ["ChatLabs", "ChatLabs Technology Inc"],
+  ["Nimblemind.ai", "Nimblemind INC."],
+  ["Lillia", "Lillia Healthcare Technologies Inc"],
+  ["Rette (Defect AI)", "Rette Corp"],
+  ["Eckuity Capital - Upsell", "Eckuity LLC"],
+  ["PicMii Crowdfunding", "PicMii Crowdfunding, LLC (d/b/a Highlander Crowdfunding)"],
+  // These two also share the customer's email DOMAIN with their Django policy
+  // (korra.ai, soap.health), so the match is doubly confirmed.
+  ["Korra", "Korra AI"],
+  ["SOAP Health", "SOAP, Inc."],
+];
+// normalised HubSpot deal name → the normalised Django legal-name key it matches.
+const COMPANY_ALIASES = new Map<string, string>(
+  COMPANY_ALIAS_PAIRS.map(([deal, legal]) => [
+    normalizeCompany(deal),
+    normalizeCompany(legal),
+  ]),
+);
+
 // The BASE company for a HubSpot deal, with any trailing deal-type suffix
 // removed ("Trellus (YC W22) - D&O upsell" and "Trellus (YC W22) - D&O" both →
 // "trellus yc w22"; "Journey - Upsell" → "journey"). This lets a company's base
@@ -328,9 +364,15 @@ function resolveCorgiRevenue(
     const names = new Set<string>(
       [normalizeCompany(d.company), baseCompanyKey(d.company)].filter(Boolean),
     );
+    // A human-confirmed alias (e.g. "ChatLabs" → "ChatLabs Technology Inc") is a
+    // STRONG name handle: it lets this deal claim the policy filed under the
+    // Django legal name, exactly as if the names had matched directly.
+    const alias = COMPANY_ALIASES.get(normalizeCompany(d.company));
+    if (alias) names.add(alias);
     const all = new Set<string>(names);
     const email = normalizeEmail(emailByDeal.get(d.id) ?? "");
-    if (email) all.add(email);
+    if (email) all.add(email); // exact-buyer handle (email domain is NOT used —
+    // shared broker addresses span unrelated companies; see buildPolicies).
     nameHandles.set(d.id, names);
     allHandles.set(d.id, all);
   }
@@ -470,14 +512,21 @@ function resolveCorgiRevenue(
 }
 
 // ----------------------------------------------------------------------------
-// Fill in quoted premiums on OPEN deals that Django quoted under a different
-// company name. Open/Meeting-Booked deals only get a quote figure when their
-// HubSpot company name matches Django's spelling, so many genuinely-quoted deals
-// showed no quote ("—"). Django keys the same buyer reliably by EMAIL, so for any
-// open deal that has a contact email but no company-name quote, we look up that
-// email's largest quoted (not-yet-purchased) premium and surface it. Purchased
-// deals are untouched (their revenue is resolved separately); this only ever
-// fills a missing quote, never overwrites one already found by name.
+// Attach Django quotes to OPEN deals whose company name didn't line up with
+// Django's spelling. A deal only gets a quote by NAME when HubSpot's company
+// name matches Django's — so brand-vs-legal-name drift ("Anomaly" vs "Anomaly
+// Innovations Inc.") and quotes filed under an unrelated legal name (Cosmos AI's
+// quote sits under "Bazzuka, Inc.") were missed. Django keys the same buyer
+// reliably by EMAIL, and by their company's email DOMAIN even when the exact
+// person differs, so for any open deal still missing a quote we look the buyer up
+// by email, then by domain, and copy across:
+//   • hasCorgiQuote — so the deal shows as "Quoted" (a real quote OR a purchase),
+//     including a "needs_review" quote whose premium Django hasn't computed yet
+//     (badge shows, value stays "—");
+//   • the quoted premium, only when we don't already have one and Django has a
+//     non-zero figure.
+// Purchased-policy REVENUE is resolved elsewhere (by policy name/email); this
+// only ever fills display fields on open deals, never overwrites a name match.
 // ----------------------------------------------------------------------------
 const OPEN_STAGES: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
 
@@ -488,13 +537,27 @@ function enrichOpenQuotes(
 ): Prospect[] {
   for (const r of rows) {
     if (!OPEN_STAGES.includes(r.stage)) continue;
-    if ((r.corgiQuotedPremium ?? 0) > 0) continue; // already have a quote
+    if (r.hasCorgiQuote && (r.corgiQuotedPremium ?? 0) > 0) continue; // fully resolved by name
+    // Try to find this open deal's Django record three ways, cheapest first:
+    //   1. a loose NAME match (exact, else a unique legal-name prefix) — needs no
+    //      email, so it catches brand-vs-legal drift ("Anomaly" → "Anomaly
+    //      Innovations Inc.", "Cloudbreak Energy" → "…Partners LLC");
+    //   2. the buyer's exact email;
+    //   3. the buyer's company email domain.
+    // This never touches revenue/ownership (matchCompany, exact-only, still owns
+    // that) — it only fills display flags on open deals.
     const email = normalizeEmail(emailByDeal.get(r.id) ?? "");
-    if (!email) continue;
-    const quoted = index.byEmail.get(email)?.quotedPremium ?? 0;
-    if (quoted > 0) {
-      r.corgiQuotedPremium = quoted;
-      r.hasCorgiQuote = true;
+    const dom = email ? emailDomain(email) : "";
+    const c =
+      matchCompanyLoose(index.byCompany, r.company) ??
+      (email ? index.byEmail.get(email) : null) ??
+      (dom ? index.byDomain.get(dom) : null) ??
+      null;
+    if (!c) continue;
+    if (c.hasQuote) r.hasCorgiQuote = true; // real quote (or purchase) exists → Quoted
+    if (!r.corgiStatus && c.status) r.corgiStatus = c.status;
+    if ((r.corgiQuotedPremium ?? 0) === 0 && c.quotedPremium > 0) {
+      r.corgiQuotedPremium = c.quotedPremium;
     }
   }
   return rows;
@@ -641,13 +704,6 @@ function collapseCrossBdr(rows: Prospect[]): Prospect[] {
   return out;
 }
 
-// In-memory cache shared across requests on the same server instance. Holds the
-// last successful result so repeat visits within CACHE_TTL_MS skip HubSpot.
-let cache: { at: number; data: Prospect[] } | null = null;
-// If a fetch is already in flight, everyone waits on the same promise instead
-// of each kicking off their own HubSpot run.
-let inFlight: Promise<Prospect[]> | null = null;
-
 async function loadProspects(token: string): Promise<Prospect[]> {
   const { id2name, name2id } = await fetchOwners(token);
   // Turn our team's names into HubSpot user IDs for the search filter.
@@ -705,38 +761,46 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   return rows;
 }
 
+// The expensive pull (all HubSpot deals + the full Corgi/Django quote & policy
+// feed, ~30–60s cold) wrapped in Next's persistent Data Cache. Unlike a plain
+// module-level variable — which lives only inside ONE serverless instance and is
+// thrown away when that instance sleeps — unstable_cache stores the finished
+// result in a cache that is SHARED across every serverless instance (and even
+// across deployments) on Vercel. So the first visitor pays the slow pull once,
+// and for the next REVALIDATE_SECONDS everyone else (on any instance) gets it
+// instantly. After that window the next request triggers a background refresh;
+// it may serve the slightly-stale copy while the new numbers are fetched, so the
+// page is never blocked on the slow pull again. The HubSpot key is read inside
+// this function (server-only, never in the cache key or the browser). It also
+// coalesces concurrent identical calls, so a burst of visitors triggers one pull.
+const getCachedProspects = unstable_cache(
+  async (): Promise<Prospect[]> => {
+    const token = process.env.HUBSPOT_TOKEN;
+    if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
+    return loadProspects(token);
+  },
+  ["prospects-v1"], // cache key (no secrets); bump the suffix to force a refresh
+  { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
+);
+
 export async function GET() {
-  const token = process.env.HUBSPOT_TOKEN;
-  if (!token) {
+  if (!process.env.HUBSPOT_TOKEN) {
     return Response.json(
       { error: "HUBSPOT_TOKEN is not set on the server." },
       { status: 500 },
     );
   }
 
-  // Fresh cache → return instantly.
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
-    return Response.json(cache.data);
-  }
-
   try {
-    // Coalesce concurrent requests onto one HubSpot run.
-    if (!inFlight) {
-      inFlight = loadProspects(token).then((data) => {
-        cache = { at: Date.now(), data };
-        return data;
-      });
-    }
-    const prospects = await inFlight;
+    const prospects = await getCachedProspects();
     return Response.json(prospects);
   } catch (err) {
-    // On failure, serve the last good cache if we have one.
-    if (cache) return Response.json(cache.data);
+    // The browser keeps its own last-good copy (localStorage) and falls back to
+    // it when this route errors, so a transient upstream failure never blanks
+    // the dashboard — see getProspects() in app/lib/data.ts.
     return Response.json(
       { error: err instanceof Error ? err.message : "Unknown error" },
       { status: 502 },
     );
-  } finally {
-    inFlight = null;
   }
 }

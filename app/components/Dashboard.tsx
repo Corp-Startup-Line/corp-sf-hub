@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getProspects,
+  loadCachedProspects,
   filterProspects,
   computeFunnel,
   computeDealValues,
@@ -39,6 +40,13 @@ export default function Dashboard() {
   const [allRows, setAllRows] = useState<Prospect[]>([]);
   useEffect(() => {
     let alive = true;
+    // Instant paint: if we saved a payload on a previous visit, show it right
+    // away so the dashboard isn't blank while the slow first live pull runs.
+    const cached = loadCachedProspects();
+    if (cached) {
+      setAllRows(cached);
+      setLoading(false);
+    }
     // Pull the latest deals now, then quietly re-pull every 3 minutes so the
     // numbers stay fresh without anyone reloading the page. The re-pulls run in
     // the background (no loading skeleton) so the dashboard never flickers.
