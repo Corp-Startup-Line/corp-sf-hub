@@ -80,7 +80,7 @@ const INBOUND_HINT =
 
 // Plain-English tooltip for the rep-outbound column.
 const OUTBOUND_HINT =
-  "Last time the rep reached out to the customer — any logged activity (call, email, meeting/invite), from HubSpot's Last Contacted stamp.";
+  "Last time the rep touched the deal — any logged activity (call, email, meeting/invite, or note), from HubSpot's Last Activity.";
 
 // Stages offered in the Stage filter dropdown. The funnel no longer has a
 // "Qualified" card, so the dropdown must not offer it either — otherwise you

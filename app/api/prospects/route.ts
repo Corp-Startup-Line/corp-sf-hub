@@ -62,6 +62,7 @@ const DEAL_PROPERTIES = [
   "bdr",
   "hubspot_owner_id",
   "notes_last_contacted",
+  "notes_last_updated",
   "hs_last_sales_activity_timestamp",
   "closedate",
   "createdate",
@@ -165,6 +166,18 @@ function toDate(iso: string | null | undefined): string | null {
   return iso ? iso.slice(0, 10) : null;
 }
 
+// Return whichever of two HubSpot timestamps is more recent (ISO strings sort
+// chronologically, so a plain string compare gives the later one). Used so
+// "Last Rep Contact" reflects the broader "Last Activity" — the newest of a
+// logged call/email/meeting OR a note update — not just calls/emails/meetings.
+function latestIso(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): string | null {
+  if (a && b) return a > b ? a : b;
+  return a ?? b ?? null;
+}
+
 function mapDeal(
   d: HubSpotDeal,
   id2name: Map<string, string>,
@@ -217,12 +230,13 @@ function mapDeal(
     notes: "",
     month: when.slice(0, 7), // "YYYY-MM"
     confirmed: stage === "Closed Won", // fallback until Corgi says otherwise
-    // Every deal must carry a real HubSpot date. Prefer the true "Last
-    // Contacted" stamp; fall back to HubSpot's last sales-activity timestamp,
-    // then to the deal's creation date as a floor ("nothing since it was
-    // created"). This guarantees no deal is left with a null contact date.
+    // Every deal must carry a real HubSpot date. Prefer the newest of the "Last
+    // Contacted" stamp (calls/emails/meetings) and "Last Activity" stamp (which
+    // also covers logged notes) — this is HubSpot's broader activity view; then
+    // fall back to the last sales-activity timestamp, then to the deal's
+    // creation date as a floor. This guarantees no deal has a null contact date.
     lastContact:
-      toDate(p.notes_last_contacted) ??
+      toDate(latestIso(p.notes_last_contacted, p.notes_last_updated)) ??
       toDate(p.hs_last_sales_activity_timestamp) ??
       toDate(p.createdate),
   };
