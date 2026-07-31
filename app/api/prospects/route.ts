@@ -22,6 +22,7 @@ import {
   type CorgiIndex,
 } from "./corgi";
 import { enrichEngagements, type Engagement } from "./engagements";
+import { TEAM_BDRS, TEAM_AES } from "./team";
 
 // Always run fresh on each request (read the live key + live deals), never
 // cached at build time.
@@ -38,37 +39,8 @@ const HUBSPOT_BASE = "https://api.hubapi.com";
 // numbers. Used by unstable_cache below (Next's persistent Data Cache).
 const REVALIDATE_SECONDS = 5 * 60; // 5 minutes
 
-// YOUR BDR team — only deals whose HubSpot "BDR" field is one of these people
-// show in the dashboard. Everyone else's / company-wide deals are ignored.
-// Names must match the HubSpot owner's full name exactly. Edit this list to
-// add or remove a teammate.
-const TEAM_BDRS = new Set([
-  "Jed Clark",
-  "Oz Harkavi",
-  "Ben Boneham",
-  "Daryl Wilson",
-  "Gabriel Serrano",
-  "Carwyn Chiramel",
-  "Luke Jopling",
-  "Dino Citti",
-  "Andrew Bagasbas",
-  "Parker Horton",
-  "Amos Book",
-]);
-
-// YOUR AE team — a deal's "owner" in HubSpot is the AE. Only these six people
-// are corp AEs; any other owner (including BDRs who happen to own a deal) is
-// shown as "Unassigned" on the AE side so they don't clutter the AE cards.
-// Names must match the HubSpot owner's full name exactly.
-const TEAM_AES = new Set([
-  "Matthew Elmer", // "Matt" in HubSpot is registered as Matthew Elmer
-  "Alex Frankel",
-  "Drew Gordillo",
-  "Tor Gordon",
-  "Gavin Winchell",
-  "Garrett Martel", // HubSpot spelling (garrett@corgi.insure)
-  "Samuel Noyce", // "Sam" in HubSpot is registered as Samuel Noyce
-]);
+// YOUR team roster lives in ONE place now — app/api/prospects/team.ts. Add or
+// remove a teammate there; both this route and the dashboard read from it.
 
 // HubSpot's internal stage IDs → the dashboard's stage names.
 // (Mapping confirmed with Carwyn: Contract Sent folds into Quoted; HubSpot's

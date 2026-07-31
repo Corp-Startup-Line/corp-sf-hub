@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getProspects,
+  getRoster,
   loadCachedProspects,
   filterProspects,
   computeFunnel,
@@ -64,14 +65,36 @@ export default function Dashboard() {
     };
   }, []);
 
-  // The BDR roster is derived straight from the deals (whoever actually has
-  // deals in HubSpot), so it's always in sync with the data — no hardcoded list.
+  // The official team roster from the server (app/api/prospects/team.ts). We show
+  // everyone on it — even a rep with 0 deals so far, like someone just added — so
+  // new teammates appear immediately instead of only after their first deal.
+  const [rosterBdrs, setRosterBdrs] = useState<string[]>([]);
+  const [rosterAes, setRosterAes] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getRoster().then((r) => {
+      if (!alive || !r) return;
+      setRosterBdrs(r.bdrs);
+      setRosterAes(r.aes);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // The BDR list = everyone on the official roster PLUS anyone who has deals but
+  // somehow isn't on the roster (belt-and-suspenders), so the dashboard always
+  // shows all teammates and never silently drops someone who has real deals.
   const dataBdrs = useMemo(
     () =>
       Array.from(
-        new Set(allRows.map((r) => r.bdr).filter((b) => b && b !== "Unassigned")),
+        new Set(
+          [...rosterBdrs, ...allRows.map((r) => r.bdr)].filter(
+            (b) => b && b !== "Unassigned",
+          ),
+        ),
       ).sort(),
-    [allRows],
+    [allRows, rosterBdrs],
   );
 
   // The month dropdown is built from the months that actually have deals, so
@@ -84,13 +107,18 @@ export default function Dashboard() {
     [allRows],
   );
 
-  // Same idea for AEs (the deal owners), used by the AE breakdown tab.
+  // Same idea for AEs (the deal owners), used by the AE breakdown tab: roster
+  // first, plus any AE who has deals but isn't on the roster.
   const dataAes = useMemo(
     () =>
       Array.from(
-        new Set(allRows.map((r) => r.ae).filter((a) => a && a !== "Unassigned")),
+        new Set(
+          [...rosterAes, ...allRows.map((r) => r.ae)].filter(
+            (a) => a && a !== "Unassigned",
+          ),
+        ),
       ).sort(),
-    [allRows],
+    [allRows, rosterAes],
   );
 
   // "Manage BDRs" can tweak this in-session; it re-syncs when data reloads.

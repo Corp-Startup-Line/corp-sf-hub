@@ -70,7 +70,8 @@ type SortKey =
   | "bdr"
   | "ae"
   | "lastInbound"
-  | "quote";
+  | "quote"
+  | "lastContact";
 
 // Plain-English tooltip for the engagement column, so it's clear what the date
 // means.
@@ -93,7 +94,7 @@ const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "ae", label: "AE" },
   { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
   { key: "quote", label: "Quote (Corgi)" },
-  { key: null, label: "Last Rep Contact", hint: OUTBOUND_HINT },
+  { key: "lastContact", label: "Last Rep Contact", hint: OUTBOUND_HINT },
 ];
 
 export default function ProspectsTable({

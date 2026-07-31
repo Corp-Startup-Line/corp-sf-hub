@@ -238,6 +238,25 @@ export async function getProspects(): Promise<Prospect[]> {
   }
 }
 
+// The official team roster (from the server's team.ts). We fetch this separately
+// from the deals so the dashboard can show EVERY teammate — including anyone with
+// 0 deals yet, like a rep you just added. It's a tiny list of names, so it's cheap.
+export type Roster = { bdrs: string[]; aes: string[] };
+
+export async function getRoster(): Promise<Roster | null> {
+  try {
+    const res = await fetch("/api/roster");
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (Array.isArray(data?.bdrs) && Array.isArray(data?.aes)) {
+      return { bdrs: data.bdrs as string[], aes: data.aes as string[] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // The live pull is slow on a cold serverless instance (Django has to be paged in
 // full, ~30-60s). To keep the dashboard feeling instant we stash the last good
 // payload in the browser and render it immediately on the next visit while a

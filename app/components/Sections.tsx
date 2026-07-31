@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import type {
   Stage,
   FunnelStage,
@@ -329,6 +330,77 @@ export function RepCards({
   onSelect: (name: string) => void;
   showQuota?: boolean; // AEs don't carry a BDR quota, so hide the bar for them
 }) {
+  // Netflix-style ENDLESS rail. We render the cards three times in a row and
+  // keep the scroll position parked in the MIDDLE copy. When the rail comes to
+  // rest we snap the position back into that middle copy using a modulo of one
+  // copy-width. Every copy is identical, so the snap is invisible — and because
+  // it only runs once the rail is IDLE (never mid-animation), it can't fight the
+  // smooth arrow glides. The result: the row loops forever and the arrows keep
+  // working no matter how many times you click.
+  const railRef = useRef<HTMLDivElement>(null);
+  const idleTimer = useRef<number | null>(null);
+  const animRef = useRef<number | null>(null);
+  const loop = stats.length > 0 ? [...stats, ...stats, ...stats] : stats;
+
+  const wrapToMiddle = useCallback(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const setW = el.scrollWidth / 3;
+    if (setW === 0) return;
+    const off = (((el.scrollLeft - setW) % setW) + setW) % setW; // 0 .. setW
+    const normalized = setW + off;
+    if (Math.abs(normalized - el.scrollLeft) > 1) el.scrollLeft = normalized;
+  }, []);
+
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    // Start parked in the middle copy so there's content in BOTH directions.
+    el.scrollLeft = el.scrollWidth / 3;
+    // Re-center only after scrolling has settled (debounced), so it never
+    // interrupts an in-flight smooth scroll from the arrows.
+    const onScroll = () => {
+      if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
+      idleTimer.current = window.setTimeout(wrapToMiddle, 140);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", wrapToMiddle);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", wrapToMiddle);
+      if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
+      if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    };
+    // Re-park when the card set changes (BDR ⇄ AE, roster updates).
+  }, [wrapToMiddle, stats.length, team]);
+
+  // Arrow click: glide by ~one screen-width. We animate the scroll ourselves with
+  // requestAnimationFrame (an eased tween) rather than the browser's native
+  // "smooth" option, which some engines silently ignore — this way the glide is
+  // reliable everywhere. The idle re-center above loops it once the glide settles.
+  function nudge(dir: 1 | -1) {
+    const el = railRef.current;
+    if (!el) return;
+    if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    const from = el.scrollLeft;
+    const to = from + dir * el.clientWidth * 0.85;
+    const duration = 350;
+    const start = performance.now();
+    const ease = (p: number) =>
+      p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; // easeInOutQuad
+    const step = (now: number) => {
+      const p = Math.min(1, (now - start) / duration);
+      el.scrollLeft = from + (to - from) * ease(p);
+      if (p < 1) {
+        animRef.current = requestAnimationFrame(step);
+      } else {
+        animRef.current = null;
+        wrapToMiddle();
+      }
+    };
+    animRef.current = requestAnimationFrame(step);
+  }
+
   return (
     <section className="mb-10">
       <div className="mb-4 flex items-center justify-between">
@@ -350,37 +422,86 @@ export function RepCards({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {stats.map((r) => (
-          <Card key={r.name} onClick={() => onSelect(r.name)} active={selected === r.name}>
-            <div className="flex items-center justify-between">
-              <span className="font-medium">{r.name}</span>
-              {showQuota && (
-                <span className="text-sm text-neutral-400">{r.quotaPct}%</span>
-              )}
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <Stat label="Deals" value={r.prospects} />
-              <Stat label="Meetings" value={r.meetings} />
-              <Stat label="Quoted" value={r.quoted} />
-            </div>
-            <div className="mt-3 flex items-baseline justify-between text-sm">
-              <span className="text-neutral-500 dark:text-neutral-400">
-                {r.wonCount} won
-              </span>
-              <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                {moneyFull(r.wonValue)}
-              </span>
-            </div>
-            {showQuota && (
-              <div className="mt-2">
-                <ProgressBar pct={r.quotaPct} />
+      <div className="relative">
+        <RailArrow dir="left" show onClick={() => nudge(-1)} />
+        <RailArrow dir="right" show onClick={() => nudge(1)} />
+
+        <div
+          ref={railRef}
+          className="flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {loop.map((r, i) => (
+            <Card
+              key={`${r.name}-${i}`}
+              onClick={() => onSelect(r.name)}
+              active={selected === r.name}
+              className="w-[280px] shrink-0"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-medium">{r.name}</span>
+                {showQuota && (
+                  <span className="text-sm text-neutral-400">{r.quotaPct}%</span>
+                )}
               </div>
-            )}
-          </Card>
-        ))}
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <Stat label="Deals" value={r.prospects} />
+                <Stat label="Meetings" value={r.meetings} />
+                <Stat label="Quoted" value={r.quoted} />
+              </div>
+              <div className="mt-3 flex items-baseline justify-between text-sm">
+                <span className="text-neutral-500 dark:text-neutral-400">
+                  {r.wonCount} won
+                </span>
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  {moneyFull(r.wonValue)}
+                </span>
+              </div>
+              {showQuota && (
+                <div className="mt-2">
+                  <ProgressBar pct={r.quotaPct} />
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
       </div>
     </section>
+  );
+}
+
+// A single frosted-glass "liquid glass" scroll arrow that floats over one edge
+// of the rail. Fades/scales in only when there's more to scroll that way.
+function RailArrow({
+  dir,
+  show,
+  onClick,
+}: {
+  dir: "left" | "right";
+  show: boolean;
+  onClick: () => void;
+}) {
+  const left = dir === "left";
+  return (
+    <button
+      type="button"
+      aria-label={left ? "Scroll left" : "Scroll right"}
+      onClick={onClick}
+      className={`absolute top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/60 bg-white/70 text-neutral-700 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.7),0_10px_28px_-10px_rgba(0,0,0,0.35)] backdrop-blur-xl backdrop-saturate-150 transition-all duration-200 hover:bg-white/90 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8),0_14px_32px_-10px_rgba(0,0,0,0.4)] active:scale-90 dark:border-white/15 dark:bg-neutral-800/70 dark:text-neutral-100 dark:hover:bg-neutral-800/90 ${
+        left ? "left-1" : "right-1"
+      } ${show ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0"}`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.25}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-5 w-5"
+      >
+        {left ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+      </svg>
+    </button>
   );
 }
 
