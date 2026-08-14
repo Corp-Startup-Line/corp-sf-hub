@@ -38,7 +38,7 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-4 py-16 sm:px-6 lg:px-8">
       <div className="mb-10 text-center">
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          Corgi Hub SF
+          Corp SF Hub
         </h1>
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
           Choose a dashboard · live from HubSpot
