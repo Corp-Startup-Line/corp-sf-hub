@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Corgi Cold Call Playbook</title>
+<title>Corgi Outbound Playbook</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -440,6 +440,116 @@
     font-size: 0.85rem;
   }
 
+  /* Email templates */
+  .email {
+    background: var(--surface);
+    border: 0.5px solid var(--line-strong);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(38,32,26,0.03);
+  }
+  .email + .email { margin-top: 0.85rem; }
+  .email-head {
+    display: flex; align-items: center; gap: 0.7rem;
+    padding: 0.85rem 1.25rem;
+    background: var(--surface-2);
+    border-bottom: 0.5px solid var(--line);
+  }
+  .email-when {
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #fff;
+    background: var(--clay);
+    padding: 0.2rem 0.5rem;
+    border-radius: 5px;
+    flex-shrink: 0;
+  }
+  .email-name {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.02rem;
+    color: var(--ink);
+    flex: 1;
+  }
+  .copy-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--clay-deep);
+    background: transparent;
+    border: 0.5px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+  }
+  .copy-btn:hover { background: var(--clay); color: #fff; border-color: var(--clay); }
+  .copy-btn.done { background: var(--green); color: #fff; border-color: var(--green); }
+  .email-subject {
+    padding: 0.7rem 1.25rem 0;
+    font-size: 0.86rem;
+    color: var(--ink-soft);
+  }
+  .email-subject b {
+    color: var(--ink); font-weight: 600;
+  }
+  .email-body {
+    padding: 0.6rem 1.25rem 1.1rem;
+    white-space: pre-wrap;
+    font-size: 0.9rem;
+    line-height: 1.62;
+    color: var(--ink);
+  }
+  .email-body .fill { color: var(--clay-deep); font-weight: 600; }
+  .email-note {
+    margin: 0 1.25rem 1.1rem;
+    padding: 0.6rem 0.85rem;
+    background: rgba(74,131,224,0.07);
+    border-left: 2.5px solid var(--blue);
+    border-radius: 0 7px 7px 0;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    line-height: 1.45;
+  }
+  .email-note b { color: #35619e; font-weight: 600; }
+
+  /* Rules of the room */
+  .rules { list-style: none; display: grid; gap: 0.55rem; }
+  .rules li {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    padding-left: 1.5rem;
+    position: relative;
+    line-height: 1.5;
+  }
+  .rules li::before {
+    content: "→";
+    position: absolute; left: 0; top: 0;
+    color: var(--clay);
+    font-weight: 700;
+  }
+  .rules li b { color: var(--ink); font-weight: 600; }
+
+  /* Subject bank */
+  .subjects { display: grid; gap: 0.5rem; }
+  .subject-row {
+    display: flex; align-items: baseline; gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--surface-2);
+    border: 0.5px solid var(--line);
+    border-radius: 9px;
+    font-size: 0.88rem;
+  }
+  .subject-row .sub-line { color: var(--ink); font-weight: 500; flex: 1; }
+  .subject-row .sub-use { color: var(--ink-mute); font-size: 0.78rem; text-align: right; }
+  @media (max-width: 500px) {
+    .subject-row { flex-direction: column; gap: 0.15rem; }
+    .subject-row .sub-use { text-align: left; }
+  }
+
   .footer-note {
     text-align: center;
     font-size: 0.78rem;
@@ -454,7 +564,7 @@
 <div class="wrap">
 
   <header class="masthead">
-    <h1>Cold Call Playbook</h1>
+    <h1>Outbound Playbook</h1>
     <p class="sub">Corgi · BDR Field Reference</p>
     <p class="quote"><span class="mark">"</span>The money is already printed. You just gotta go get it.<span class="mark">"</span></p>
     <hr class="rule">
@@ -473,6 +583,10 @@
           <span class="ico">🛡️</span>
           <span class="lbl">Policies<small>Battle cards · triggers</small></span>
         </button>
+        <button class="side-btn" data-panel="email">
+          <span class="ico">✉️</span>
+          <span class="lbl">Email Playbook<small>Templates · subject lines</small></span>
+        </button>
       </nav>
 
       <div class="side-jump" data-for="script">
@@ -487,6 +601,16 @@
         <a href="#p-cards">Battle Cards</a>
         <a href="#p-mistakes">Common Mistakes</a>
       </div>
+      <div class="side-jump" data-for="email" style="display:none;">
+        <div class="side-jump-label">Jump to</div>
+        <a href="#e-rules">Rules of the Room</a>
+        <a href="#e-cold">Cold Open</a>
+        <a href="#e-reactivate">Reactivation</a>
+        <a href="#e-bump">The Bump Sequence</a>
+        <a href="#e-booked">Booked-Call Confirm</a>
+        <a href="#e-welcome">Welcome / Referral</a>
+        <a href="#e-subjects">Subject-Line Bank</a>
+      </div>
     </aside>
 
     <!-- CONTENT -->
@@ -500,11 +624,11 @@
   <div class="grid-2">
     <div class="card">
       <span class="tag">Opener A · Direct</span>
-      <p class="script-line"><strong><span class="fill">Name</span>!</strong> Hey, this is Carwyn. I'm calling on behalf of a Y Combinator-backed company called Corgi. Wanted to give you a quick call about <span class="fill">___</span>.</p>
+      <p class="script-line"><strong><span class="fill">[Name]</span>!</strong> Hey, this is <span class="fill">[Your Name]</span>. I'm calling on behalf of a Y Combinator-backed company called Corgi. Wanted to give you a quick call about <span class="fill">___</span>.</p>
     </div>
     <div class="card">
       <span class="tag">Opener B · Permission</span>
-      <p class="script-line">Hey, this is Carwyn, calling on behalf of a Y Combinator-backed company called Corgi. Could I steal 20 seconds? If it doesn't make sense, we shake hands and part ways. How's that sound?</p>
+      <p class="script-line">Hey, this is <span class="fill">[Your Name]</span>, calling on behalf of a Y Combinator-backed company called Corgi. Could I steal 20 seconds? If it doesn't make sense, we shake hands and part ways. How's that sound?</p>
     </div>
   </div>
 
@@ -717,6 +841,189 @@
 
     </section>
 
+    <!-- ============ PANEL: EMAIL PLAYBOOK ============ -->
+    <section class="panel" id="panel-email">
+
+  <!-- RULES -->
+  <div class="eyebrow" id="e-rules"><span class="n">1</span> Rules of the Room</div>
+  <div class="card">
+    <ul class="rules">
+      <li><b>Consequence first.</b> Lead with the number they're losing, not a pleasantry. "Came in at roughly $8k last time. Honestly think there's a better number here."</li>
+      <li><b>Short declarative lines.</b> One idea per line. No paragraphs, no "would love to," no filler.</li>
+      <li><b>Always name a dollar figure.</b> A real stat beats an adjective. "Pulled $19k back for a founder last week on D&amp;O and Cyber alone."</li>
+      <li><b>One ask per send.</b> A time, a doc, or an accept. Never two.</li>
+      <li><b>Same-day close.</b> "If you like the number, you're covered that day — we handle cancelling your existing policies."</li>
+      <li><b>No em-dashes in body copy.</b> Use periods. Keep it clean.</li>
+    </ul>
+  </div>
+
+  <!-- COLD OPEN -->
+  <div class="eyebrow" id="e-cold"><span class="n">2</span> Cold Open · No Prior Quote</div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">Locked SOP</span>
+      <span class="email-name">"your broker is keeping something from you"</span>
+      <button class="copy-btn" data-copy="cold1">Copy</button>
+    </div>
+    <div class="email-subject"><b>Subject:</b> your broker is keeping something from you</div>
+    <div class="email-body" id="tpl-cold1">Hey <span class="fill">[First]</span>,
+
+Most founders overpay 20-50% on business insurance. Not because they have to. Because a broker sits in the middle and takes a cut.
+
+We're Corgi (YC S24). An actual carrier built for startups. No broker, no markup. You talk straight to the people who set the price.
+
+15 minutes shows you what you're paying vs what you should be. Number's yours either way.
+
+Worth a look?
+
+Talk soon,
+<span class="fill">[Your Name]</span>
+
+P.S. - Shot you a request on LinkedIn</div>
+    <div class="email-note"><b>Locked body.</b> Subject and P.S. are fixed. This is the cold-email SOP - don't rewrite the core lines. For the LinkedIn follow-up variant, open with "Good to connect." and reference the connection in the P.S.</div>
+  </div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">Short variant</span>
+      <span class="email-name">"actual insurance carrier"</span>
+      <button class="copy-btn" data-copy="cold2">Copy</button>
+    </div>
+    <div class="email-subject"><b>Subject:</b> <span class="fill">[Company]</span> x Corgi</div>
+    <div class="email-body" id="tpl-cold2">Hey <span class="fill">[First]</span>,
+
+Tried pinging you earlier...
+
+We're Corgi (YC S24), an actual insurance carrier built for startups. Most companies overpay 20-50% by using brokers instead of going directly to a carrier like us.
+
+Worth a free 15-min call to see what you're paying vs what you should be?
+
+Talk soon,
+<span class="fill">[Your Name]</span></div>
+    <div class="email-note"><b>When:</b> a quick, punchy first touch on a fresh prospect - especially paired with a call attempt ("tried pinging you earlier"). Shorter than the locked SOP.</div>
+  </div>
+
+  <!-- REACTIVATION -->
+  <div class="eyebrow" id="e-reactivate"><span class="n">3</span> Reactivation · Dormant Quote</div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">Touch 1</span>
+      <span class="email-name">"Been a while.."</span>
+      <button class="copy-btn" data-copy="reactivate">Copy</button>
+    </div>
+    <div class="email-subject"><b>Subject:</b> Been a while.. &nbsp;/&nbsp; Still a priority? &nbsp;/&nbsp; Still looking to get covered?</div>
+    <div class="email-body" id="tpl-reactivate"><span class="fill">[First]</span> - Still have your quote for <span class="fill">[Company]</span>'s policies for Tech, Cyber etc..
+
+Came in at roughly <span class="fill">$[X]k</span> last time. Honestly think there's a better number here. 15 mins with our underwriter, and we'll know for sure.
+
+Have priorities shifted, or is this still something you're looking to finalize?
+
+Talk soon,
+<span class="fill">[Your Name]</span></div>
+    <div class="email-note"><b>When:</b> a quote that went quiet. Swap the coverage lines to match what they were quoted. The dollar figure is the hook — always include it.</div>
+  </div>
+
+  <!-- BUMP SEQUENCE -->
+  <div class="eyebrow" id="e-bump"><span class="n">4</span> The Bump Sequence</div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">Touch 2</span>
+      <span class="email-name">The buried-email bump</span>
+      <button class="copy-btn" data-copy="bump2">Copy</button>
+    </div>
+    <div class="email-subject"><b>Reply on the same thread.</b> Keep the original subject.</div>
+    <div class="email-body" id="tpl-bump2">Bumping this in case it got buried..
+
+Pulled <span class="fill">$19k</span> back for a founder last week on D&amp;O and Cyber alone. That money didn't disappear. His broker was just keeping it.
+
+Talk soon,
+<span class="fill">[Your Name]</span></div>
+    <div class="email-note"><b>When:</b> ~24h after Touch 1 with no reply. Social proof + the broker-margin stat does the work.</div>
+  </div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">Touch 3</span>
+      <span class="email-name">"3rd time's the charm"</span>
+      <button class="copy-btn" data-copy="bump3">Copy</button>
+    </div>
+    <div class="email-subject"><b>Same thread.</b> Final bump before you rest the lead.</div>
+    <div class="email-body" id="tpl-bump3">Hopefully the 3rd time's the charm here.
+
+I get it... insurance is slow and boring. That's not us. We cut the broker out - you talk straight to the carrier. If you like the number, you're covered that day.
+
+Worth 15 minutes?
+
+Talk soon,
+<span class="fill">[Your Name]</span></div>
+    <div class="email-note"><b>When:</b> ~24h after Touch 2. If this one dies, note it in HubSpot and set a reactivation date. Don't keep hammering.</div>
+  </div>
+
+  <!-- BOOKED CALL -->
+  <div class="eyebrow" id="e-booked"><span class="n">5</span> Booked-Call Confirmation</div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">On booking</span>
+      <span class="email-name">"Here's what we're doing in 15 minutes"</span>
+      <button class="copy-btn" data-copy="booked">Copy</button>
+    </div>
+    <div class="email-subject"><b>Reply on thread</b> the moment they pick a time.</div>
+    <div class="email-body" id="tpl-booked"><span class="fill">[First]</span> - <span class="fill">[Day]</span> works!
+
+CCing <span class="fill">[Underwriter]</span>, our Lead Underwriter - he'll be running the numbers live on the call. Hit accept if you have a sec.
+
+Here's what we're doing in 15 minutes:
+  → Underwrite <span class="fill">[Company]</span> in real time, in front of you
+  → Show you exactly what you're exposed to and what it costs
+  → Leave you with a number - no follow-up needed
+
+If you like the quote, you're covered on the same day, and we handle cancelling your existing policies.
+
+P.S. - Customer stories here if you want them: corgi.insure/customers
+
+Talk soon,
+<span class="fill">[Your Name]</span></div>
+    <div class="email-note"><b>Always:</b> CC the underwriter, send the calendar accept, and BCC HubSpot. The three bullets never change.</div>
+  </div>
+
+  <!-- WELCOME -->
+  <div class="eyebrow" id="e-welcome"><span class="n">6</span> Welcome / Referral Ask</div>
+  <div class="email">
+    <div class="email-head">
+      <span class="email-when">Policy bound</span>
+      <span class="email-name">"Welcome to Corgi 🎉 🐶"</span>
+      <button class="copy-btn" data-copy="welcome">Copy</button>
+    </div>
+    <div class="email-subject"><b>Subject:</b> Welcome to Corgi 🎉 🐶</div>
+    <div class="email-body" id="tpl-welcome"><span class="fill">[First]</span> -
+
+Policy is bound; coverage is live. 🎉🐶
+
+Now the job is making sure coverage keeps pace as you grow. As you hit milestones - funding round, new hires, first enterprise contract - shoot me a note. One message and we'll make sure you're covered for what's next.
+
+Got one ask though - if a founder you know ever brings up insurance, send them our way. Some of our best customers have come through other founders like you :)
+
+Talk soon,
+<span class="fill">[Your Name]</span></div>
+    <div class="email-note"><b>When:</b> policy binds. Sets up the expansion motion and plants the referral ask while goodwill is highest.</div>
+  </div>
+
+  <!-- SUBJECT BANK -->
+  <div class="eyebrow" id="e-subjects"><span class="n">7</span> Subject-Line Bank</div>
+  <div class="card">
+    <div class="subjects">
+      <div class="subject-row"><span class="sub-line">your broker is keeping something from you</span><span class="sub-use">Cold open (locked SOP)</span></div>
+      <div class="subject-row"><span class="sub-line">Been a while..</span><span class="sub-use">Dormant quote</span></div>
+      <div class="subject-row"><span class="sub-line">Still a priority?</span><span class="sub-use">Reactivation</span></div>
+      <div class="subject-row"><span class="sub-line">Still looking to get covered?</span><span class="sub-use">Reactivation</span></div>
+      <div class="subject-row"><span class="sub-line">I know you don't take meetings but..</span><span class="sub-use">Pattern interrupt</span></div>
+      <div class="subject-row"><span class="sub-line">Confirmed — here's what we're doing on [Day]</span><span class="sub-use">Post-booking (locked SOP)</span></div>
+      <div class="subject-row"><span class="sub-line">Welcome to Corgi 🎉 🐶</span><span class="sub-use">Onboarding</span></div>
+    </div>
+  </div>
+
+  <p class="footer-note">Body copy from your sent SOPs. <strong>Keep the fixed lines fixed.</strong></p>
+
+    </section>
+
     </main>
   </div><!-- /shell -->
 
@@ -726,7 +1033,8 @@
   const btns = document.querySelectorAll('.side-btn');
   const panels = {
     script: document.getElementById('panel-script'),
-    policy: document.getElementById('panel-policy')
+    policy: document.getElementById('panel-policy'),
+    email: document.getElementById('panel-email')
   };
   const jumps = document.querySelectorAll('.side-jump');
 
@@ -745,6 +1053,21 @@
       e.preventDefault();
       const el = document.querySelector(a.getAttribute('href'));
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  // Copy email templates (plain text, placeholders intact)
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const src = document.getElementById('tpl-' + btn.dataset.copy);
+      if (!src) return;
+      const text = src.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        btn.classList.add('done');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('done'); }, 1600);
+      });
     });
   });
 </script>
