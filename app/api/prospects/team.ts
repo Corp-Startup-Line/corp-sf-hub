@@ -18,35 +18,32 @@
 
 // YOUR BDRs — only deals whose HubSpot "BDR" field is one of these people show
 // on the dashboard. Everyone else's / company-wide deals are ignored.
+// The SF Revenue team (matches the SF BDR/AE dashboard roster). Parker Horton
+// and Amos Book sit in BOTH lists on purpose: they source deals (BDR) AND close
+// deals (AE), so their numbers show on both the BDR and the AE side.
 export const TEAM_BDR_NAMES = [
-  "Jed Clark",
-  "Oz Harkavi",
-  "Ben Boneham",
-  "Daryl Wilson",
-  "Gabriel Serrano",
-  "Carwyn Chiramel",
-  "Luke Jopling",
-  "Dino Citti",
   "Andrew Bagasbas",
+  "Dino Citti",
+  "Carwyn Chiramel",
+  "Garrett Peterson",
+  "Jackson Lau",
+  "Broderick Cowan",
+  "Ethan Wilensky",
   "Parker Horton",
   "Amos Book",
-  "Pristina Adhikari",
-  "Lewis Mitchell",
-  "Fernando Cabrera",
-  "Alex Estes",
 ] as const;
 
 // YOUR AEs — a deal's "owner" in HubSpot is the AE. Only these people are corp
 // AEs; any other owner (including BDRs who happen to own a deal) is shown as
 // "Unassigned" on the AE side so they don't clutter the AE cards.
+// NOTE: Dino Citti and Jackson Lau are BDRs only — they occasionally close their
+// own demos as the deal owner but are NOT corp AEs, so they are deliberately kept
+// off this list. Their owned wins are credited to their BDR card (see BDR_NOT_AE
+// in route.ts), not shown on the AE side.
 export const TEAM_AE_NAMES = [
-  "Matthew Elmer", // "Matt" in HubSpot is registered as Matthew Elmer
-  "Alex Frankel",
-  "Drew Gordillo",
-  "Tor Gordon",
-  "Gavin Winchell",
-  "Garrett Martel", // HubSpot spelling (garrett@corgi.insure)
-  "Samuel Noyce", // "Sam" in HubSpot is registered as Samuel Noyce
+  "Amos Book",
+  "Kaya Roberts",
+  "Parker Horton",
 ] as const;
 
 // Fast lookups used by the server route (built from the lists above — don't edit).

@@ -9,6 +9,7 @@ import {
   dealValue,
   hubspotUrl,
   effectiveStage,
+  monthsFromRows,
   type DealHealth,
   type Prospect,
   type Stage,
@@ -84,8 +85,10 @@ const OUTBOUND_HINT =
 
 // Stages offered in the Stage filter dropdown. The funnel no longer has a
 // "Qualified" card, so the dropdown must not offer it either — otherwise you
-// could filter to a stage the funnel doesn't show. Mirrors the funnel.
-const FILTER_STAGES = STAGES.filter((s) => s !== "Qualified");
+// could filter to a stage the funnel doesn't show. "Quoted" is also dropped:
+// with Django retired we no longer track it, and every former Quoted deal now
+// lives in "Meeting Booked". Mirrors the funnel.
+const FILTER_STAGES = STAGES.filter((s) => s !== "Qualified" && s !== "Quoted");
 
 const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "company", label: "Company" },
@@ -139,12 +142,11 @@ export default function ProspectsTable({
   }
 
   // The months present in these deals, newest first, for the Month dropdown.
-  // Built from the rows themselves so only months that actually have deals show.
+  // Uses the shared monthsFromRows helper so it matches the trend chart and the
+  // top filter bar exactly — same months, and future months (e.g. next month's
+  // booked meetings) are excluded from all three.
   const monthOptions = useMemo(
-    () =>
-      Array.from(new Set(rows.map((r) => r.month).filter(Boolean)))
-        .sort()
-        .reverse() as string[],
+    () => [...monthsFromRows(rows)].reverse(),
     [rows],
   );
 
@@ -166,7 +168,7 @@ export default function ProspectsTable({
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter((r) =>
-        [r.company, r.contact, r.bdr, r.ae, effectiveStage(r), r.notes]
+        [r.company, r.contact, r.bdr, r.owner ?? r.ae, effectiveStage(r), r.notes]
           .join(" ")
           .toLowerCase()
           .includes(q),
@@ -181,7 +183,9 @@ export default function ProspectsTable({
           ? dealValue(p)
           : sortKey === "lastInbound"
             ? lastPositiveContact(p)
-            : p[sortKey];
+            : sortKey === "ae"
+              ? p.owner ?? p.ae
+              : p[sortKey];
       const av = resolve(a);
       const bv = resolve(b);
       let cmp: number;
@@ -319,7 +323,7 @@ export default function ProspectsTable({
                   <StageBadge stage={effectiveStage(r)} />
                 </td>
                 <td className="px-4 py-3">{r.bdr}</td>
-                <td className="px-4 py-3">{r.ae}</td>
+                <td className="px-4 py-3">{r.owner ?? r.ae}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
                   {lastPositiveContact(r) ? (
                     prettyDate(lastPositiveContact(r)!)

@@ -1,0 +1,2096 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Corp SF Metrics — Corgi</title>
+<style>
+  /* ============================================================
+     THEME TOKENS
+     ============================================================ */
+  :root {
+    --accent: #c9762f;        /* Corgi ginger (matches Corp SF Pipeline) */
+    --accent-soft: rgba(201,118,47,0.14);
+    --good: #10b981;
+    --warn: #f59e0b;
+    --bad:  #f43f5e;
+    --radius: 20px;
+    --radius-sm: 13px;
+    --gap: 22px;
+    /* one calm easing curve used everywhere */
+    --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  html[data-theme="dark"] {
+    --bg:        #14100b;      /* Corgi warm near-black */
+    --bg-2:      #1d1710;
+    --card:      rgba(40, 32, 22, 0.55);       /* warm frosted glass over the gradient */
+    --card-solid:#1c160e;
+    --card-2:    rgba(28, 22, 14, 0.5);
+    --line:      rgba(255,255,255,0.10);
+    --hair:      rgba(255,255,255,0.10);       /* top hairline highlight */
+    --track:     rgba(255,255,255,0.06);
+    --text:      #f2e9dc;
+    --text-dim:  #9a8f7f;
+    /* soft, diffuse, layered shadow */
+    --shadow:    0 1px 1px rgba(0,0,0,0.20), 0 8px 24px rgba(0,0,0,0.30), 0 24px 60px rgba(0,0,0,0.24);
+  }
+  html[data-theme="light"] {
+    --bg:        #f4ebdd;      /* Corgi warm cream */
+    --bg-2:      #efe4d2;
+    --card:      rgba(255,255,255,0.70);
+    --card-solid:#fffdf9;
+    --card-2:    rgba(250,244,235,0.7);
+    --line:      rgba(60,45,20,0.10);
+    --hair:      rgba(255,255,255,0.7);
+    --track:     rgba(60,45,20,0.08);
+    --text:      #2b2016;
+    --text-dim:  #8a7c68;
+    --shadow:    0 1px 1px rgba(60,50,30,0.06), 0 8px 22px rgba(60,50,30,0.07), 0 22px 50px rgba(60,50,30,0.06);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 620px at 100% -12%, rgba(201,118,47,0.14), transparent 60%),
+      radial-gradient(950px 520px at -8% 4%, rgba(224,165,104,0.15), transparent 58%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    letter-spacing: 0.1px;
+    min-height: 100vh;
+    padding: 34px clamp(18px, 5vw, 60px) 72px;
+  }
+  a { color: inherit; }
+
+  /* ============================================================
+     HEADER
+     ============================================================ */
+  .topbar {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: var(--gap); flex-wrap: wrap; margin-bottom: 24px;
+  }
+  .brand { display: flex; flex-direction: column; gap: 6px; }
+  .brand .row { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: var(--accent); display: grid; place-items: center;
+    font-size: 20px; box-shadow: 0 6px 16px var(--accent-soft);
+  }
+  .brand .corgi { font-weight: 800; font-size: 15px; letter-spacing: 0.3px; color: var(--accent); }
+  .brand .kicker { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); text-transform: uppercase; }
+  .brand h1 { margin: 4px 0 0; font-size: clamp(26px, 4vw, 40px); font-weight: 650; letter-spacing: -1px; }
+
+  .hero {
+    text-align: center; border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px 40px; background: var(--card); box-shadow: var(--shadow); position: relative;
+    -webkit-backdrop-filter: saturate(140%) blur(20px); backdrop-filter: saturate(140%) blur(20px);
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; border-radius: var(--radius) var(--radius) 0 0;
+    background: linear-gradient(90deg, transparent, var(--hair) 22%, var(--hair) 78%, transparent); pointer-events: none;
+  }
+  .hero-wrap { display: flex; justify-content: center; margin: 26px 0 4px; }
+  .hero .label { font-size: 10px; letter-spacing: 2px; color: var(--text-dim); text-transform: uppercase; font-weight: 600; }
+  .hero .val { font-size: 44px; font-weight: 700; line-height: 1.05; letter-spacing: -1.5px; }
+  .hero .sub { font-size: 11px; color: var(--text-dim); font-weight: 450; }
+
+  .controls { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .updated {
+    font-size: 11px; color: var(--good); display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; background: var(--card);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px rgba(53,192,122,0.2); }
+  .toggle { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--card); }
+  .toggle button { background: none; border: 0; color: var(--text-dim); padding: 6px 14px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .toggle button.active { background: var(--accent-soft); color: var(--accent); }
+
+  /* ============================================================
+     TABS
+     ============================================================ */
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+  .tab {
+    border: 1px solid var(--line); background: var(--card); color: var(--text-dim);
+    padding: 9px 18px; border-radius: 999px; font-size: 13px; font-weight: 550; cursor: pointer;
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    transition: transform .35s var(--ease), background .35s var(--ease), color .35s var(--ease), border-color .35s var(--ease);
+  }
+  .tab:hover { transform: translateY(-1px); color: var(--text); }
+  .tab.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 6px 18px rgba(255,106,43,0.28); }
+  .tab.ghost.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .tabs .spacer { flex: 1; }
+  .viewnav { gap: 10px; margin-bottom: 26px; }
+  .viewnav .tab.view, .viewnav .tab.aeview { padding: 11px 26px; font-size: 14px; }
+  /* primary role nav (Home · BDRs · AEs) */
+  .rolenav { gap: 10px; margin-bottom: 22px; }
+  .rolenav .tab.role { padding: 12px 30px; font-size: 15px; font-weight: 700; }
+  /* admin roster */
+  .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--gap); }
+  .admincard { padding: 24px 24px 14px; }
+  .admin-h { display: flex; align-items: center; justify-content: space-between;
+    font-size: 16px; font-weight: 650; margin-bottom: 3px; }
+  .admin-count { font-size: 12px; font-weight: 650; color: var(--accent);
+    background: var(--accent-soft); border-radius: 999px; padding: 3px 11px; min-width: 26px; text-align: center; }
+  .admin-sub { font-size: 12.5px; color: var(--text-dim); margin-bottom: 16px; }
+  .admin-add { display: flex; gap: 8px; margin-bottom: 6px; }
+  .admin-add input { flex: 1; padding: 11px 13px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: var(--card-2); color: var(--text);
+    font: inherit; transition: border-color .2s var(--ease); }
+  .admin-add input::placeholder { color: var(--text-dim); }
+  .admin-add input:focus { outline: none; border-color: var(--accent); }
+  .admin-addbtn { padding: 11px 18px; border-radius: var(--radius-sm); border: 0;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 650; cursor: pointer;
+    box-shadow: 0 6px 16px var(--accent-soft); transition: filter .2s ease; }
+  .admin-addbtn:hover { filter: brightness(1.07); }
+  .roster-list { display: flex; flex-direction: column; }
+  .roster-row { display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 4px; border-top: 1px solid var(--line); }
+  .roster-row .rn { font-weight: 500; }
+  .roster-actions { display: flex; gap: 8px; }
+  .roster-del, .roster-edit { background: transparent; border: 1px solid var(--line); color: var(--text-dim);
+    padding: 6px 13px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px;
+    transition: color .2s ease, border-color .2s ease; }
+  .roster-del:hover { color: var(--bad); border-color: var(--bad); }
+  .roster-edit:hover { color: var(--accent); border-color: var(--accent); }
+  .roster-empty { color: var(--text-dim); padding: 15px 4px; font-size: 14px; }
+  /* admin password gate */
+  .gate-card { max-width: 420px; margin: 40px auto; padding: 40px 36px; text-align: center; }
+  .gate-lock { font-size: 34px; margin-bottom: 14px; }
+  .gate-title { font-size: 19px; font-weight: 650; margin-bottom: 6px; }
+  .gate-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 24px; line-height: 1.5; }
+  .gate-form { display: flex; gap: 8px; }
+  .gate-form input { flex: 1; padding: 12px 14px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: var(--card-2); color: var(--text);
+    font: inherit; transition: border-color .2s var(--ease); }
+  .gate-form input:focus { outline: none; border-color: var(--accent); }
+  .gate-err { color: var(--bad); font-size: 13px; margin-top: 14px; font-weight: 500; }
+  /* homepage role cards */
+  .rolecard { padding: 28px 30px; display: flex; flex-direction: column; cursor: pointer;
+    transition: transform .4s var(--ease), border-color .4s var(--ease), box-shadow .4s var(--ease); }
+  .rolecard:hover { transform: translateY(-3px); border-color: var(--hair);
+    box-shadow: 0 1px 1px rgba(0,0,0,0.2), 0 16px 40px rgba(0,0,0,0.34), 0 30px 70px rgba(255,106,43,0.08); }
+  .rolecard .rc-top { display: flex; align-items: center; gap: 13px; }
+  .rolecard .rc-emoji { font-size: 30px; line-height: 1; }
+  .rolecard .rc-title { font-size: 24px; font-weight: 650; letter-spacing: -0.6px; }
+  .rolecard .rc-role { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+  .rolecard .rc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 24px 0 8px; flex: 1; align-content: center; }
+  .rolecard .rc-stat { display: flex; flex-direction: column; justify-content: center;
+    padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); }
+  .rolecard .rc-stat .rv { font-size: 27px; font-weight: 700; letter-spacing: -1px; }
+  .rolecard .rc-stat .rk { font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-dim); margin-top: 4px; font-weight: 500; }
+  .rolecard .rc-cta { margin-top: 18px; color: var(--accent); font-weight: 650; font-size: 13px; }
+  /* homepage single team/BDR/AE card with a segmented toggle */
+  .teamcard { padding: 30px 32px 26px; }
+  .teamcard .tc-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+  .teamcard .tc-id { display: flex; align-items: center; gap: 14px; }
+  .teamcard .rc-emoji { font-size: 30px; line-height: 1; }
+  .teamcard .rc-title { font-size: 24px; font-weight: 650; letter-spacing: -0.6px; }
+  .teamcard .rc-role { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+  .teamcard .rc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 28px 0 4px; }
+  .teamcard .rc-stat { display: flex; flex-direction: column; justify-content: center;
+    padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); }
+  .teamcard .rc-stat .rv { font-size: 30px; font-weight: 700; letter-spacing: -1px; }
+  .teamcard .rc-stat .rk { font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-dim); margin-top: 5px; font-weight: 500; }
+  .teamcard .rc-cta { margin-top: 20px; color: var(--accent); font-weight: 650; font-size: 13px; cursor: pointer; display: inline-block; }
+  .teamcard .rc-cta:hover { opacity: .8; }
+  .teamcard .tc-body { animation: tcfade .45s var(--ease); }
+  @keyframes tcfade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  /* week picker: dropdown → vertical scrollable popup (≈5 weeks visible) */
+  .wk-dropdown { position: relative; display: inline-block; }
+  .wk-trigger { min-width: 180px; display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .wk-trigger .caret { font-size: 10px; opacity: .7; }
+  .wk-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40;
+    width: 210px; max-height: 208px; overflow-y: auto; padding: 7px;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    -webkit-backdrop-filter: saturate(150%) blur(24px); backdrop-filter: saturate(150%) blur(24px);
+    box-shadow: var(--shadow); }
+  .wk-menu[hidden] { display: none; }
+  .wk-opt { display: block; width: 100%; text-align: left; background: transparent; border: 0;
+    color: var(--text); padding: 9px 12px; border-radius: 9px; font: inherit; font-size: 14px; cursor: pointer; }
+  .wk-opt:hover { background: var(--accent-soft); }
+  .wk-opt.active { background: var(--accent); color: #fff; }
+  /* biggest deal of the week banner */
+  .bigdeal { display: flex; align-items: center; gap: 20px; padding: 20px 24px; margin-bottom: 20px;
+    border: 1px solid rgba(255,106,43,0.35); border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255,106,43,0.18), rgba(255,106,43,0.02)); }
+  .bigdeal .trophy { font-size: 36px; line-height: 1; }
+  .bigdeal .bd-main { display: flex; flex-direction: column; gap: 4px; }
+  .bigdeal .bd-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+  .bigdeal .bd-rev { font-size: 34px; font-weight: 700; letter-spacing: -1.4px; }
+  .bigdeal .bd-tags { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+  .bd-tag { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; min-width: 120px;
+    border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
+  .bd-tag .role { font-size: 10px; letter-spacing: .8px; text-transform: uppercase; color: var(--accent); font-weight: 800; }
+  .bd-tag .who { font-size: 14px; font-weight: 700; }
+  @media (max-width: 720px){ .bigdeal { flex-wrap: wrap; } .bigdeal .bd-tags { margin-left: 0; width: 100%; } }
+  .office-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+    padding: 9px 18px; border-radius: 999px; box-shadow: 0 6px 16px var(--accent-soft);
+  }
+
+  /* ============================================================
+     SECTIONS
+     ============================================================ */
+  .section { margin-bottom: 34px; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 0 14px; }
+  .section-head .tier { font-size: 11px; letter-spacing: 2.5px; color: var(--accent); text-transform: uppercase; font-weight: 650; }
+  .section-head .desc { font-size: 12px; color: var(--text-dim); font-weight: 450; }
+
+  .grid { display: grid; gap: var(--gap); }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+  .card {
+    position: relative;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    -webkit-backdrop-filter: saturate(140%) blur(20px);
+    backdrop-filter: saturate(140%) blur(20px);
+  }
+  /* faint top hairline — the light-catching edge of a milled surface */
+  .card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; border-radius: var(--radius) var(--radius) 0 0;
+    background: linear-gradient(90deg, transparent, var(--hair) 22%, var(--hair) 78%, transparent);
+    pointer-events: none;
+  }
+  /* gentle load-in: fade + rise, softly staggered across a grid */
+  @keyframes cardIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .hero, .card { animation: cardIn .55s var(--ease) both; }
+  .grid > .card:nth-child(1) { animation-delay: .02s; }
+  .grid > .card:nth-child(2) { animation-delay: .07s; }
+  .grid > .card:nth-child(3) { animation-delay: .12s; }
+  .grid > .card:nth-child(4) { animation-delay: .17s; }
+  .grid > .card:nth-child(5) { animation-delay: .22s; }
+  .grid > .card:nth-child(6) { animation-delay: .27s; }
+  .grid > .card:nth-child(7) { animation-delay: .32s; }
+  .grid > .card:nth-child(8) { animation-delay: .37s; }
+  @media (prefers-reduced-motion: reduce) { .hero, .card { animation: none; } }
+  .stat { padding: 18px 20px; position: relative; overflow: hidden; }
+  .stat .k { font-size: 11px; letter-spacing: 0.8px; color: var(--text-dim); text-transform: uppercase; font-weight: 600; }
+  .stat .v { font-size: 30px; font-weight: 700; letter-spacing: -0.8px; margin: 7px 0 3px; }
+  .stat .t { font-size: 11px; color: var(--text-dim); font-weight: 450; }
+  .pill { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; display: inline-block; }
+  .pill.good { color: var(--good); background: rgba(53,192,122,0.14); }
+  .pill.warn { color: var(--warn); background: rgba(245,183,61,0.14); }
+  .pill.bad  { color: var(--bad);  background: rgba(239,90,90,0.14); }
+  .stat .edge { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: rgba(255,255,255,0.05); }
+  .stat .edge .fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 0 3px 3px 0; transition: height .6s ease; }
+  .edge.good { background: var(--good); } .edge.warn { background: var(--warn); } .edge.bad { background: var(--bad); }
+
+  /* ============================================================
+     LEADERBOARDS
+     ============================================================ */
+  .boards { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 780px){ .boards { grid-template-columns: 1fr; } }
+  .board { padding: 22px 24px 24px; }
+  .board .bhead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  .board .bhead .title { font-size: 19px; font-weight: 600; letter-spacing: -0.3px; }
+  .board .bhead .total { font-size: 34px; font-weight: 700; letter-spacing: -1.3px; margin-left: auto; }
+  .lb-row { display: grid; grid-template-columns: 22px minmax(0,1fr) 72px max-content; align-items: center; gap: 10px; padding: 5px 0; }
+  .lb-row .rank { font-size: 13px; color: var(--text-dim); text-align: center; font-weight: 700; }
+  .lb-row .name { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lb-row .name .medal { margin-right: 5px; }
+  .lb-row .barwrap { height: 9px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .lb-row .bar { height: 100%; background: var(--accent); border-radius: 999px; }
+  .lb-row .num { min-width: 60px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ============================================================
+     TARGETS
+     ============================================================ */
+  .targets { padding: 22px 24px; }
+  .targets h3 { margin: 0 0 4px; font-size: 18px; font-weight: 800; }
+  .targets .note { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 10px 10px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+  .rowlabel { font-weight: 800; }
+  .rowlabel small { display: block; font-weight: 500; color: var(--text-dim); font-size: 10px; }
+  .arr-accent { color: var(--accent); font-weight: 800; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .chip { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--card-2); flex: 1 1 140px; }
+  .chip .ck { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); }
+  .chip .cv { font-size: 18px; font-weight: 800; margin-top: 3px; }
+  .ramp-goals { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 10px; margin-top: 16px; }
+  .goal { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card-2); }
+  .goal .m { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--accent); font-weight: 800; }
+  .goal .g { font-size: 14px; font-weight: 700; margin-top: 4px; }
+  .goal .g small { color: var(--text-dim); font-weight: 500; }
+
+  /* ============================================================
+     PER-BDR TRENDS (small multiples)
+     ============================================================ */
+  .spark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+  .spark { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 13px 14px 9px; box-shadow: var(--shadow); }
+  .spark .sh { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+  .spark .sh .nm { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spark .sh .tot { font-size: 13px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+  .spark svg { display: block; width: 100%; height: 62px; }
+  .spark .axis { font-size: 9px; fill: var(--text-dim); font-family: inherit; }
+  .spark-area { fill: var(--accent-soft); stroke: none; }
+  .spark-line { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; }
+  .spark-rule { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; }
+
+  /* ============================================================
+     PER-BDR PROGRESSION
+     ============================================================ */
+  .bdr-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .bdr-head .who { font-size: 24px; font-weight: 800; letter-spacing: -0.4px; }
+  .stage-pill { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; padding: 5px 12px; border-radius: 999px; }
+  .stage-pill.ramp   { color: var(--accent); background: var(--accent-soft); }
+  .stage-pill.steady { color: var(--good);   background: rgba(53,192,122,0.14); }
+  .bdr-metrics { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
+  .mchart { padding: 20px 22px 16px; }
+  .mchart .ct { font-size: 13px; font-weight: 700; color: var(--text-dim); margin-bottom: 14px; }
+  .mbars { display: flex; align-items: flex-end; gap: 16px; height: 200px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 4px; }
+  /* grow to fill when few months, but never shrink below 56px → overflow scrolls once history is long (e.g. May → now) */
+  .mbar { flex: 1 0 56px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 56px; }
+  .mbar .col { width: 100%; max-width: 64px; background: linear-gradient(180deg, var(--accent), var(--accent-soft)); border-radius: 8px 8px 0 0; transition: height .25s ease; }
+  .mbar .mv { font-size: 13px; font-weight: 800; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+  .mbar .ml { font-size: 11px; color: var(--text-dim); margin-top: 10px; font-weight: 600; }
+  .bdr-charts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); margin-top: 18px; }
+  @media (max-width: 820px){ .bdr-charts { grid-template-columns: 1fr; } }
+  .bdr-charts .mbars { height: 150px; }
+  .mbar2 .cols2 { display: flex; align-items: flex-end; justify-content: center; gap: 5px; width: 100%; height: 100%; }
+  .mbar2 .cols2 .col { width: 22px; border-radius: 6px 6px 0 0; }
+  .mbar2 .cols2 .col.out { background: linear-gradient(180deg, var(--accent), var(--accent-soft)); }
+  .mbar2 .cols2 .col.in  { background: linear-gradient(180deg, #4d9bff, rgba(77,155,255,0.15)); }
+  .mv2, .num2 { display: flex; gap: 10px; }
+  .mv2 { justify-content: center; }
+  .num2 { justify-content: flex-end; font-variant-numeric: tabular-nums; }
+  .num2 .ovn, .num2 .ivn { min-width: 2.4ch; text-align: right; flex: 0 0 auto; }
+  .num2-money .ovn, .num2-money .ivn { min-width: 6ch; }
+  .ovn { color: var(--accent); }
+  .ivn { color: #4d9bff; }
+  .mchart .ct small { color: var(--text-dim); font-weight: 600; }
+  .mchart.score .col { background: linear-gradient(180deg, var(--good), rgba(53,192,122,0.15)); }
+  .mchart.score .mv { color: var(--good); }
+  /* Monthly ARR-goal view: keep the chart + board in a tidy centered column */
+  #team-goal-monthly { max-width: 880px; margin: 0 auto; }
+  #team-goal-monthly .mbars { height: 220px; }
+  #team-goal-monthly .mbar { flex: 1 1 0; min-width: 0; }
+
+  /* ============================================================
+     TEAM ARR GOAL
+     ============================================================ */
+  .goal-wrap { display: grid; grid-template-columns: 300px 1fr; gap: var(--gap); align-items: stretch; }
+  @media (max-width: 780px){ .goal-wrap { grid-template-columns: 1fr; } }
+  .ring-card { padding: 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .ring-card svg { width: 220px; height: 220px; }
+  .ring-hole { position: relative; width: 220px; height: 220px; }
+  .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .ring-track { fill: none; stroke: var(--track); stroke-width: 16; }
+  .ring-fill  { fill: none; stroke: var(--accent); stroke-width: 16; stroke-linecap: round;
+                transition: stroke-dashoffset .6s ease; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .ring-out { stroke: var(--accent); }
+  .ring-in  { stroke: #4d9bff; }
+  .ring-legend { display: flex; gap: 16px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  .ring-legend .lg { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+  .ring-legend .sw { width: 11px; height: 11px; border-radius: 3px; }
+  .ring-legend .sw.out { background: var(--accent); }
+  .ring-legend .sw.in  { background: #4d9bff; }
+  .ring-legend .lg b { font-weight: 800; }
+  .ring-pct { font-size: 40px; font-weight: 700; letter-spacing: -1.6px; }
+  .ring-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; font-weight: 450; }
+  .ring-card .headline { margin-top: 16px; font-size: 22px; font-weight: 650; letter-spacing: -0.6px; }
+  .ring-card .goalnum { color: var(--text-dim); font-weight: 600; }
+  .goal-barwrap { position: relative; padding: 22px 0 2px; }
+  .goal-cur { position: absolute; top: 0; transform: translateX(-50%); font-size: 13px; font-weight: 800; letter-spacing: -0.3px; white-space: nowrap; color: var(--text); }
+  .goal-cur::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 6px; background: var(--text); transform: translateX(-50%); }
+  .goal-end { position: absolute; right: 0; top: 0; font-size: 13px; font-weight: 800; letter-spacing: -0.3px; white-space: nowrap; color: var(--text-dim); }
+  .goal-bar { width: 100%; height: 14px; background: var(--track); border-radius: 999px; overflow: hidden; margin: 6px 0 2px; display: flex; }
+  .goal-bar .fill { height: 100%; transition: width .6s ease; }
+  .goal-bar .fill.out { background: linear-gradient(90deg, var(--accent), #ff9a5c); }
+  .goal-bar .fill.in  { background: linear-gradient(90deg, #4d9bff, #7db8ff); }
+  .lb-row .barwrap.split { display: flex; }
+  .lb-row .barwrap .bar.out { background: var(--accent); border-radius: 0; }
+  .lb-row .barwrap .bar.in  { background: #4d9bff; border-radius: 0; }
+  .contrib { margin-top: 6px; }
+  .contrib .lb-row { grid-template-columns: 22px minmax(0,1fr) 120px 140px; }
+
+  .quote { text-align: center; margin: 36px auto 34px; padding: 0 16px; max-width: 720px; }
+  .quote .q { font-size: clamp(16px, 2.2vw, 23px); font-weight: 550; letter-spacing: -0.4px;
+              background: linear-gradient(90deg, var(--accent), #ff9a5c); -webkit-background-clip: text;
+              background-clip: text; -webkit-text-fill-color: transparent; }
+  .quote .q .mark { color: var(--text-dim); -webkit-text-fill-color: var(--text-dim); font-weight: 600; }
+  .quote .by { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-top: 6px; }
+
+  .foot { text-align: center; font-size: 11px; color: var(--text-dim); margin-top: 30px; }
+
+  /* Any wide table scrolls horizontally instead of crushing its columns. */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { min-width: 460px; }
+
+  /* ============================================================
+     MOBILE  ·  ≤ 560px  (phones)
+     Tighten chrome, stack side-by-side blocks, keep charts/tables
+     horizontally scrollable so nothing clips off-screen.
+     ============================================================ */
+  @media (max-width: 560px) {
+    body { padding: 20px 16px 48px; }
+
+    /* header + hero: reclaim vertical space */
+    .topbar { margin-bottom: 16px; }
+    .controls { flex-direction: row; align-items: center; flex-wrap: wrap; }
+    .hero-wrap { margin: 16px 0 2px; }
+    .hero { padding: 14px 22px; }
+    .hero .val { font-size: 38px; }
+    .quote { margin: 22px auto; }
+
+    /* location bar: let the two badges sit inline-left and wrap if needed */
+    .tabs .spacer { display: none; }
+
+    /* nav pills: smaller so the row wraps tidily */
+    .rolenav .tab.role { padding: 10px 18px; font-size: 14px; }
+    .viewnav .tab.view, .viewnav .tab.aeview { padding: 9px 18px; font-size: 13px; }
+
+    /* stack the section header label + description */
+    .section-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .section { margin-bottom: 26px; }
+
+    /* homepage team/BDR/AE card: fit 3 stat tiles without overflow */
+    .teamcard { padding: 22px 18px 18px; }
+    .teamcard .tc-head { gap: 12px; }
+    .teamcard .rc-title, .rolecard .rc-title { font-size: 21px; }
+    .teamcard .rc-stats { gap: 9px; margin-top: 20px; }
+    .teamcard .rc-stat { padding: 13px 11px; }
+    .teamcard .rc-stat .rv { font-size: 22px; }
+    .rolecard { padding: 22px 20px; }
+    .rolecard .rc-stats { gap: 10px; }
+    .rolecard .rc-stat { padding: 13px 12px; }
+    .rolecard .rc-stat .rv { font-size: 22px; }
+
+    /* leaderboards: trim the fixed columns so long names get more room */
+    .lb-row { grid-template-columns: 20px minmax(0,1fr) 56px max-content; gap: 8px; }
+    .board { padding: 20px 18px 22px; }
+    .board .bhead .total { font-size: 28px; }
+    .contrib .lb-row { grid-template-columns: 18px minmax(0,1fr) 88px 96px; }
+
+    /* goal ring: don't let the 220px SVG force the card wide */
+    .ring-card { padding: 22px 16px; }
+    .ring-card svg { width: 180px; height: 180px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     TOP BAR
+     ============================================================ -->
+<header class="topbar">
+  <div class="brand">
+    <div class="row">
+      <div class="logo">🐕</div>
+      <div>
+        <div class="corgi">Corgi</div>
+        <div class="kicker">Corp Kitchen · San Francisco</div>
+      </div>
+    </div>
+    <h1>Corp SF Metrics</h1>
+  </div>
+
+  <div class="controls">
+    <a href="/" style="display:inline-flex;align-items:center;text-decoration:none;color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:6px 12px;font-size:13px;opacity:.85">← Home</a>
+    <div class="updated"><span class="dot"></span> Updated <span id="ts"></span></div>
+    <div class="toggle" id="theme">
+      <button data-th="light">☀︎ Light</button>
+      <button data-th="dark" class="active">☾ Dark</button>
+    </div>
+  </div>
+</header>
+
+<!-- HERO METRIC (centered) -->
+<div class="hero-wrap">
+  <div class="hero">
+    <div class="label">Calls Per Demo</div>
+    <div class="val" id="cpd">—</div>
+    <div class="sub">SF team · lower is better</div>
+  </div>
+</div>
+
+<!-- OFFICE BADGE + LIVE STATUS -->
+<div class="tabs">
+  <span class="office-badge">📍 SF Office</span>
+  <span class="spacer"></span>
+  <span class="office-badge" style="background:var(--card);color:var(--good);border:1px solid var(--line)">● Live from HubSpot</span>
+</div>
+
+<!-- PRIMARY NAV: Home · BDRs · AEs -->
+<nav class="tabs rolenav" id="rolenav">
+  <button class="tab role active" data-role="home">🏠 Home</button>
+  <button class="tab role" data-role="bdr">BDRs</button>
+  <button class="tab role" data-role="ae">AEs</button>
+  <button class="tab role" data-role="goal">ARR Goal</button>
+  <button class="tab role" data-role="admin">Admin</button>
+</nav>
+
+<!-- ================================ HOME ================================ -->
+<div class="page" id="page-home" data-role="home">
+  <section class="section">
+    <div class="section-head">
+      <span class="tier">SF Revenue Team</span>
+      <span class="desc">This week at a glance — toggle Team, BDR or AE</span>
+    </div>
+    <div id="home-cards"></div>
+    <div id="home-bigdeal" style="margin-top:var(--gap)"></div>
+  </section>
+  <section class="section">
+    <div class="section-head">
+      <span class="tier">Team ARR Goal</span>
+      <span class="desc">closed ARR toward the monthly office target</span>
+    </div>
+    <div id="home-goal"></div>
+  </section>
+</div>
+
+<!-- ================================ BDRs ================================ -->
+<div class="page" id="page-bdr" data-role="bdr" style="display:none">
+<nav class="tabs viewnav" id="viewnav">
+  <button class="tab view active" data-view="daily">Daily</button>
+  <button class="tab view" data-view="weekly">Weekly</button>
+  <button class="tab view" data-view="monthly">Monthly</button>
+  <button class="tab view" data-view="bdr">BDRs</button>
+</nav>
+
+<!-- DAILY -->
+<section class="section" id="daily" data-view="daily">
+  <div class="section-head">
+    <span class="tier">Daily</span>
+    <span class="desc" id="daily-desc">Today · per-rep pace vs ramp/steady targets</span>
+  </div>
+  <div class="tabs filterbar" id="daily-filter" style="margin-bottom:18px"></div>
+  <div class="grid stats" id="daily-stats"></div>
+  <div class="grid boards" style="margin-top:20px" id="daily-boards"></div>
+</section>
+
+<!-- WEEKLY -->
+<section class="section" id="weekly" data-view="weekly">
+  <div class="section-head">
+    <span class="tier">Weekly</span>
+    <span class="desc" id="weekly-desc">Pick a week · demos, close rate &amp; pipeline</span>
+  </div>
+  <div class="tabs filterbar" id="weekly-filter" style="margin-bottom:18px"></div>
+  <div class="grid stats" id="weekly-stats"></div>
+  <div class="grid boards" style="margin-top:20px" id="weekly-boards"></div>
+</section>
+
+<!-- MONTHLY -->
+<section class="section" id="monthly" data-view="monthly">
+  <div class="section-head">
+    <span class="tier">Monthly</span>
+    <span class="desc" id="monthly-desc">Pick a month · closed deals &amp; ARR against ramp plan</span>
+  </div>
+  <div class="tabs filterbar" id="monthly-filter" style="margin-bottom:18px"></div>
+  <div class="grid stats" id="monthly-stats"></div>
+  <div class="grid boards" style="margin-top:20px" id="monthly-boards"></div>
+</section>
+
+<!-- PER-BDR TRENDS (small multiples) -->
+<section class="section" id="trends" data-view="weekly">
+  <div class="section-head">
+    <span class="tier">Weekly Trend</span>
+    <span class="desc">Every week back to each BDR's start date · dashed rule = start week</span>
+  </div>
+  <div class="tabs" style="margin-bottom:16px">
+    <button class="tab metric active" data-metric="dials">Dials</button>
+    <button class="tab metric" data-metric="demos">Demos Booked</button>
+    <button class="tab metric" data-metric="arr">New ARR</button>
+    <span class="spacer"></span>
+    <span class="office-badge" style="background:var(--card);color:var(--text-dim);border:1px solid var(--line)">trailing weeks · weekly</span>
+  </div>
+  <div class="grid stats" id="trends-summary" style="margin-bottom:18px"></div>
+  <div class="spark-grid" id="spark-grid"></div>
+</section>
+
+<!-- TARGETS -->
+<section class="section" data-view="monthly">
+  <div class="section-head"><span class="tier">The Numbers</span><span class="desc">Month-by-month from start date · Ramp = first 30 days · Steady = every day after</span></div>
+  <div class="card targets">
+    <h3>Ramp vs Steady targets</h3>
+    <div class="note">Source of truth: playbook "numbers" sheet. ARR ramps $12K month 1 → $24K month 2 → $30K+ month 3 and on.</div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Stage</th><th>Dials / Day</th><th>Demos / Wk</th><th>Close Rate</th><th>Events / Wk</th><th>Monthly ARR</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="rowlabel">Ramp <small>first 30 days</small></td>
+          <td>1,000</td><td>15</td><td>65%</td><td>ALL</td><td>none → <span class="arr-accent">$12K</span></td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Steady <small>every day after</small></td>
+          <td>500</td><td>10</td><td>70%</td><td>1</td><td class="arr-accent">$12K → $30K+</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="chips">
+      <div class="chip"><div class="ck">Cold Emails / Day</div><div class="cv">15</div></div>
+      <div class="chip"><div class="ck">LinkedIn Outreach / Day</div><div class="cv">15</div></div>
+      <div class="chip"><div class="ck">Manual Dial Cap</div><div class="cv">~250</div></div>
+      <div class="chip"><div class="ck">By Month 6 Goal</div><div class="cv">$100K · 25+ OB deals</div></div>
+    </div>
+
+    <div class="ramp-goals">
+      <div class="goal"><div class="m">Month 1</div><div class="g">$8K <small>· 3 deals closed</small></div></div>
+      <div class="goal"><div class="m">Month 2</div><div class="g">$16K <small>· 5 deals closed</small></div></div>
+      <div class="goal"><div class="m">Month 3</div><div class="g">$30K <small>· 10 deals closed</small></div></div>
+      <div class="goal"><div class="m">Month 6</div><div class="g">$100K <small>· or 25+ closed OB deals</small></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- PER-BDR PROGRESSION -->
+<section class="section" id="bdr" data-view="bdr">
+  <div class="section-head">
+    <span class="tier">BDR</span>
+    <span class="desc">Pick a rep · month-by-month progression from their start date</span>
+  </div>
+  <div class="tabs" id="bdr-select" style="margin-bottom:18px"></div>
+  <div id="bdr-detail"></div>
+</section>
+
+</div><!-- /page-bdr -->
+
+<!-- ================================ AEs ================================ -->
+<div class="page" id="page-ae" data-role="ae" style="display:none">
+<nav class="tabs viewnav" id="ae-viewnav">
+  <button class="tab aeview active" data-aeview="ae-daily">Daily</button>
+  <button class="tab aeview" data-aeview="ae-weekly">Weekly</button>
+  <button class="tab aeview" data-aeview="ae-monthly">Monthly</button>
+  <button class="tab aeview" data-aeview="ae-detail">AEs</button>
+</nav>
+
+<!-- AE DAILY -->
+<section class="section" id="ae-daily" data-aeview="ae-daily">
+  <div class="section-head">
+    <span class="tier">Daily</span>
+    <span class="desc" id="ae-daily-desc">Today · per-AE closing pace vs quota</span>
+  </div>
+  <div class="tabs filterbar" id="ae-daily-filter" style="margin-bottom:18px"></div>
+  <div class="grid stats" id="ae-daily-stats"></div>
+  <div class="grid boards" style="margin-top:20px" id="ae-daily-boards"></div>
+</section>
+
+<!-- AE WEEKLY -->
+<section class="section" id="ae-weekly" data-aeview="ae-weekly" style="display:none">
+  <div class="section-head">
+    <span class="tier">Weekly</span>
+    <span class="desc" id="ae-weekly-desc">Pick a week · deals closed &amp; ARR, inbound vs outbound</span>
+  </div>
+  <div class="tabs filterbar" id="ae-weekly-filter" style="margin-bottom:18px"></div>
+  <div class="grid stats" id="ae-weekly-stats"></div>
+  <div class="grid boards" style="margin-top:20px" id="ae-weekly-boards"></div>
+</section>
+
+<!-- AE MONTHLY -->
+<section class="section" id="ae-monthly" data-aeview="ae-monthly" style="display:none">
+  <div class="section-head">
+    <span class="tier">Monthly</span>
+    <span class="desc" id="ae-monthly-desc">Pick a month · deals, ARR &amp; sources</span>
+  </div>
+  <div class="tabs filterbar" id="ae-monthly-filter" style="margin-bottom:18px"></div>
+  <div class="grid stats" id="ae-monthly-stats"></div>
+  <div class="grid boards" style="margin-top:20px" id="ae-monthly-boards"></div>
+</section>
+
+<!-- PER-AE PERFORMANCE -->
+<section class="section" id="ae-detail" data-aeview="ae-detail" style="display:none">
+  <div class="section-head">
+    <span class="tier">AE</span>
+    <span class="desc">Pick an AE · deals, ARR &amp; the metrics that grade closing</span>
+  </div>
+  <div class="tabs" id="ae-select" style="margin-bottom:18px"></div>
+  <div id="ae-detail-box"></div>
+</section>
+
+</div><!-- /page-ae -->
+
+<!-- ============================== ARR GOAL ============================== -->
+<div class="page" id="page-goal" data-role="goal" style="display:none">
+  <section class="section">
+    <div class="section-head">
+      <span class="tier">Team ARR Goal</span>
+      <span class="desc">Two lenses on the monthly office target — what BDRs sourced and what AEs closed (they overlap, not summed)</span>
+    </div>
+    <nav class="tabs" id="goal-viewnav" style="margin-bottom:16px">
+      <button class="tab goalview active" data-goalview="month" onclick="setGoalTab('month')">This Month</button>
+      <button class="tab goalview" data-goalview="monthly" onclick="setGoalTab('monthly')">Monthly</button>
+    </nav>
+    <div id="team-goal-detail"></div>
+    <div id="team-goal-monthly" style="display:none"></div>
+  </section>
+</div><!-- /page-goal -->
+
+<!-- ================================ ADMIN =============================== -->
+<div class="page" id="page-admin" data-role="admin" style="display:none">
+  <!-- password gate -->
+  <section class="section" id="admin-gate">
+    <div class="gate-card card">
+      <div class="gate-lock">🔒</div>
+      <div class="gate-title">Leadership access</div>
+      <div class="gate-sub">Enter the admin password to manage the team roster.</div>
+      <div class="gate-form">
+        <input id="admin-pw" type="password" placeholder="Password" autocomplete="off">
+        <button id="admin-unlock" class="admin-addbtn">Unlock</button>
+      </div>
+      <div class="gate-err" id="admin-err" hidden>Incorrect password — try again.</div>
+    </div>
+  </section>
+
+  <!-- roster manager (revealed after unlock) -->
+  <section class="section" id="admin-content" hidden>
+    <div class="section-head">
+      <span class="tier">Admin · Roster</span>
+      <span class="desc">Add or remove BDRs, Account Executives &amp; Account Managers</span>
+    </div>
+    <div class="admin-grid">
+      <div class="card admincard">
+        <div class="admin-h"><span>BDRs</span><span class="admin-count" id="admin-bdr-count">0</span></div>
+        <div class="admin-sub">Sourcing reps · dials &amp; demos</div>
+        <div class="admin-add">
+          <input id="admin-bdr-add" type="text" placeholder="New BDR name" autocomplete="off">
+          <button id="admin-bdr-addbtn" class="admin-addbtn">Add</button>
+        </div>
+        <div id="admin-bdr-list" class="roster-list"></div>
+      </div>
+      <div class="card admincard">
+        <div class="admin-h"><span>Account Executives</span><span class="admin-count" id="admin-ae-count">0</span></div>
+        <div class="admin-sub">Closing reps · deals &amp; ARR</div>
+        <div class="admin-add">
+          <input id="admin-ae-add" type="text" placeholder="New AE name" autocomplete="off">
+          <button id="admin-ae-addbtn" class="admin-addbtn">Add</button>
+        </div>
+        <div id="admin-ae-list" class="roster-list"></div>
+      </div>
+      <div class="card admincard">
+        <div class="admin-h"><span>Account Managers</span><span class="admin-count" id="admin-am-count">0</span></div>
+        <div class="admin-sub">Post-sale owners · deal credit</div>
+        <div class="admin-add">
+          <input id="admin-am-add" type="text" placeholder="New AM name" autocomplete="off">
+          <button id="admin-am-addbtn" class="admin-addbtn">Add</button>
+        </div>
+        <div id="admin-am-list" class="roster-list"></div>
+      </div>
+    </div>
+  </section>
+</div><!-- /page-admin -->
+
+<div class="foot">Corp SF Metrics · live from HubSpot · USD throughout · counts cached server-side to respect API limits</div>
+
+<script>
+/* ================================================================
+   DATA  ←  live from HubSpot via /api/metrics (see server.js)
+   The token stays server-side; the browser only receives aggregates.
+   ================================================================ */
+let DATA = { reps: [] };
+
+/* ================================================================
+   SHELL DATA  —  placeholder numbers shown until a real HubSpot
+   token is wired up. Swap happens automatically once /api/metrics
+   returns live data. Purely illustrative.
+   ================================================================ */
+const SHELL = (() => {
+  const WEEKS = 15;                              // May → present (weekly buckets)
+  const rangeStart = "2026-05-04";               // Monday of the first May week
+  const startDate = new Date(rangeStart + "T00:00:00");
+  const mKey = i => { const d = new Date(startDate); d.setDate(startDate.getDate() + i*7);
+                      return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0"); };
+  const lastMonth = mKey(WEEKS-1);
+  const lmIdx = [...Array(WEEKS).keys()].filter(i => mKey(i) === lastMonth);
+  const sumLM = a => lmIdx.reduce((s,i)=>s+a[i],0);
+
+  // per-rep base weekly rate + weekly growth (g) + onboarding start week
+  const defs = [
+    { name:"Priya Raghunathan", stage:"steady", start:0, dials:1900, demos:9,  arr:3400, deals:0.9, g:0.090, show:0.72, ib:0.12 },
+    { name:"Marcus Bell",       stage:"steady", start:0, dials:1850, demos:8,  arr:3000, deals:0.8, g:0.085, show:0.68, ib:0.10 },
+    { name:"Sofia Nakamura",    stage:"steady", start:0, dials:1800, demos:8,  arr:2600, deals:0.7, g:0.080, show:0.70, ib:0.15 },
+    { name:"Hannah Weiss",      stage:"steady", start:0, dials:1750, demos:7,  arr:2300, deals:0.7, g:0.080, show:0.71, ib:0.10 },
+    { name:"Chloe Tanaka",      stage:"steady", start:0, dials:1700, demos:7,  arr:2000, deals:0.6, g:0.075, show:0.69, ib:0.18 },
+    { name:"Andre Volkov",      stage:"steady", start:0, dials:1650, demos:6,  arr:1800, deals:0.5, g:0.075, show:0.67, ib:0.12 },
+    { name:"Devin Okafor",      stage:"ramp",   start:8, dials:2600, demos:10, arr:2200, deals:0.6, g:0.120, show:0.66, ib:0.08 },
+    { name:"Julian Reyes",      stage:"ramp",   start:11, dials:2400, demos:10, arr:2600, deals:0.6, g:0.130, show:0.63, ib:0.10 },
+  ];
+
+  const wob = i => 1 + (((i * 7) % 5) - 2) / 40;            // ±5% deterministic wobble
+  const gen = (base, start, g, i) => i < start ? 0 : base * (1 + g * (i - start)) * wob(i);
+
+  const buildRep = d => {
+    const dials = [], demos = [], arr = [], deals = [];
+    const obArr = [], ibArr = [], obDeals = [], ibDeals = [];
+    for (let i = 0; i < WEEKS; i++) {
+      dials.push(Math.round(gen(d.dials, d.start, d.g, i)));
+      demos.push(Math.round(gen(d.demos, d.start, d.g, i)));
+      const a = Math.round(gen(d.arr, d.start, d.g, i) / 500) * 500;
+      const dl = gen(d.deals, d.start, d.g, i);             // fractional; rounded on display
+      arr.push(a); deals.push(dl);
+      ibArr.push(Math.round(a * d.ib / 500) * 500);
+      obArr.push(Math.round(a * (1 - d.ib) / 500) * 500);
+      ibDeals.push(dl * d.ib);
+      obDeals.push(dl * (1 - d.ib));
+    }
+    const last = WEEKS - 1;
+    const todayDials = Math.round(dials[last] / 5);
+    return {
+      name: d.name, stage: d.stage, startWeek: d.start,
+      dials: todayDials,
+      appts: Math.max(1, Math.round(demos[last] / 5)),
+      connects: Math.round(todayDials * 0.08),
+      dialsWeek: dials[last],
+      dialsMonth: Math.round(sumLM(dials)),
+      demosWk: demos[last],
+      showRate: d.show,
+      dealsMo: Math.round(sumLM(deals)),
+      arrMo: Math.round(sumLM(arr) / 500) * 500,
+      obDealsMo: Math.round(sumLM(obDeals)),
+      ibDealsMo: Math.round(sumLM(ibDeals)),
+      obArrMo: Math.round(sumLM(obArr) / 500) * 500,
+      ibArrMo: Math.round(sumLM(ibArr) / 500) * 500,
+      inboundShare: d.ib,
+      series: { dials, demos, arr, deals, obArr, ibArr, obDeals, ibDeals },
+    };
+  };
+  const reps = defs.map(buildRep);
+
+  // --- AEs (closing role): deals + inbound/outbound split, weekly series ---
+  const aeDefs = [
+    { name:"Elena Vasquez",  start:0,  dealsWk:1.4, arrWk:9000, obShare:0.68, g:0.070, winRate:0.41, cycleDays:26, quotaMo:40000, dealsQuotaMo:6 },
+    { name:"Tom Fitzgerald", start:0,  dealsWk:1.2, arrWk:7500, obShare:0.72, g:0.065, winRate:0.37, cycleDays:31, quotaMo:34000, dealsQuotaMo:5 },
+    { name:"Priti Shah",     start:0,  dealsWk:1.1, arrWk:7000, obShare:0.60, g:0.060, winRate:0.35, cycleDays:29, quotaMo:32000, dealsQuotaMo:5 },
+    { name:"Marcus Chen",    start:4,  dealsWk:1.3, arrWk:8000, obShare:0.75, g:0.100, winRate:0.33, cycleDays:34, quotaMo:36000, dealsQuotaMo:5 },
+    { name:"Dana Whitfield", start:0,  dealsWk:0.9, arrWk:6000, obShare:0.55, g:0.058, winRate:0.30, cycleDays:38, quotaMo:28000, dealsQuotaMo:4 },
+    { name:"Raj Patel",      start:9,  dealsWk:1.2, arrWk:7200, obShare:0.70, g:0.110, winRate:0.36, cycleDays:33, quotaMo:33000, dealsQuotaMo:5 },
+  ];
+  const buildAe = a => {
+    // deals = closed-won; owned = every deal where they're the deal owner
+    // (won + lost + open). Win rate = won ÷ owned, so it's derived from counts,
+    // never hardcoded. HubSpot maps: deals→closedwon count, owned→all deals by
+    // hubspot_owner_id, and a.winRate here just sizes the sample pipeline.
+    const deals=[], owned=[], obDeals=[], ibDeals=[], obArr=[], ibArr=[];
+    for (let i=0;i<WEEKS;i++){
+      const d  = gen(a.dealsWk, a.start, a.g, i);
+      const ob = d * a.obShare, ib = d - ob;
+      const arr= gen(a.arrWk, a.start, a.g, i);
+      deals.push(d); owned.push(a.winRate ? d / a.winRate : d);
+      obDeals.push(ob); ibDeals.push(ib);
+      obArr.push(Math.round(arr*a.obShare/500)*500);
+      ibArr.push(Math.round(arr*(1-a.obShare)/500)*500);
+    }
+    const closeM = Math.round(sumLM(deals));
+    const ownedM = Math.round(sumLM(owned));
+    const obArrMo = Math.round(sumLM(obArr)/500)*500;
+    const ibArrMo = Math.round(sumLM(ibArr)/500)*500;
+    return {
+      name:a.name, start:a.start,
+      dealsMo:closeM, ownedMo:ownedM,
+      obDealsMo:Math.round(sumLM(obDeals)),
+      ibDealsMo:Math.round(sumLM(ibDeals)),
+      obArrMo, ibArrMo, arrMo: obArrMo + ibArrMo,
+      winRate: ownedM ? closeM / ownedM : 0,        // won ÷ owned
+      cycleDays:a.cycleDays, quotaMo:a.quotaMo, dealsQuotaMo:a.dealsQuotaMo,
+      series:{ deals, owned, obDeals, ibDeals, obArr, ibArr },
+    };
+  };
+  const aes = aeDefs.map(buildAe);
+
+  return { updatedAt:Date.now(), weeks:WEEKS, rangeStart, matchedTeam:true,
+           connectsAvailable:true, shell:true, reps, aes, buildRep, buildAe };
+})();
+
+/* Targets (playbook = source of truth) */
+const TGT = {
+  dialsRamp: 1000, dialsSteady: 500,     // per DAY
+  demosRamp: 15,   demosSteady: 10,      // per WEEK
+  showRamp: 0.65,  showSteady: 0.70,     // meeting show/attendance rate
+  closeRamp: 0.20, closeSteady: 0.30,    // demos set → closed-won deals
+  arrRampMo: 80000, arrSteadyMo: 80000,  // per MONTH — uniform $80k ARR quota per BDR
+  dealsRampMo: 3,   dealsSteadyMo: 6,    // per MONTH
+  emails: 15, li: 15,
+};
+
+/* ---------- helpers ---------- */
+const $ = (s, r=document) => r.querySelector(s);
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+const fmt = n => n.toLocaleString("en-US");
+const usd = n => "$" + Math.round(n).toLocaleString("en-US");
+const usdk = n => "$" + (n/1000).toFixed(n % 1000 === 0 ? 0 : 1) + "K";
+const pct = n => Math.round(n*100) + "%";
+const medal = i => ["🥇","🥈","🥉"][i] || "";
+
+// horizontal goal bar with the running total marked at the fill point and the goal on the end
+function goalBarMarked(total, outbound, inbound, goal) {
+  const ratio = Math.min(1, total / goal);
+  const pos = Math.min(92, Math.max(8, ratio * 100));        // keep the current-total label inside the bar
+  return `<div class="goal-barwrap">` +
+      `<div class="goal-cur" style="left:${pos}%">${usdk(total)}</div>` +
+      `<div class="goal-bar">` +
+        `<div class="fill out" style="width:${outbound / goal * 100}%"></div>` +
+        `<div class="fill in"  style="width:${inbound / goal * 100}%"></div>` +
+      `</div>` +
+      `<div class="goal-end">${usdk(goal)}</div>` +
+    `</div>`;
+}
+
+// grade a value against a target -> good / warn / bad
+function grade(val, target) {
+  const r = val / target;
+  if (r >= 1)   return "good";
+  if (r >= 0.8) return "warn";
+  return "bad";
+}
+const target = (rep, ramp, steady) => rep.stage === "ramp" ? ramp : steady;
+
+/* ---------- unified targets: one source of truth, all three tiers reconcile ----------
+   WDAYS bridges day↔week (daily × 5 = weekly); weeks-in-month bridges week↔month
+   (weekly × weeks = monthly). Each metric is anchored at its natural tier and the
+   other two tiers are derived, so the numbers always add up from daily → weekly → monthly. */
+const WDAYS = 5;                                   // dialing days per week
+const ANCHOR = { dials: "day", demos: "week", arr: "month", deals: "month" };
+function baseTgt(rep, kind) {                       // the target at the metric's own anchor tier
+  const ramp = rep.stage === "ramp";
+  switch (kind) {
+    case "dials": return ramp ? TGT.dialsRamp   : TGT.dialsSteady;    // per day
+    case "demos": return ramp ? TGT.demosRamp   : TGT.demosSteady;    // per week
+    case "arr":   return ramp ? TGT.arrRampMo   : TGT.arrSteadyMo;    // per month
+    case "deals": return ramp ? TGT.dealsRampMo : TGT.dealsSteadyMo;  // per month
+  }
+  return 0;
+}
+function tierTgt(rep, kind, tier, weeks = 4) {      // convert anchor value to day/week/month
+  const a = ANCHOR[kind], base = baseTgt(rep, kind);
+  const perWeek = a === "day" ? base * WDAYS : a === "week" ? base : base / weeks;
+  if (tier === "day")  return perWeek / WDAYS;
+  if (tier === "week") return perWeek;
+  return perWeek * weeks;                           // month
+}
+const sumTgt = (reps, fn) => reps.reduce((s, r) => s + fn(r), 0);
+
+// attainment → colour: 0% red · ~50% amber · 100%+ green (clamped)
+function ratioColor(r) {
+  const t = Math.max(0, Math.min(1, r || 0));
+  return `hsl(${Math.round(t * 130)}, 78%, 46%)`;
+}
+
+let dayMode = "today";
+let weekSel = null, monthSel = null;   // selected week index / month key (null = latest)
+// day-of-week picker (Mon–Fri). Each rep's latest-week total is spread across the 5
+// weekdays with a fixed front-loaded shape that sums to 1, so 5 days ≈ the weekly total.
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+// today's weekday index in Mon–Fri space (weekend → Fri); the daily tier only
+// shows real days up to today, so future weekdays never appear.
+const jsDay = new Date().getDay();                       // 0 Sun … 6 Sat
+const TODAY_IDX = (jsDay === 0 || jsDay === 6) ? 4 : jsDay - 1;
+let daySel = TODAY_IDX;                 // default to today
+
+/* ---------- time buckets (May → present) ---------- */
+const rangeStartDate = () => new Date((DATA.rangeStart || "2026-05-04") + "T00:00:00");
+function weekDate(i) { const d = rangeStartDate(); d.setDate(d.getDate() + i * 7); return d; }
+const weekCount = () => DATA.weeks || (DATA.reps?.[0]?.series?.dials?.length || 0);
+const weekLabel = i => weekDate(i).toLocaleString("en-US", { month: "short", day: "numeric" });
+const monthKey  = i => { const d = weekDate(i); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0"); };
+const monthLabel= k => new Date(k + "-01T00:00:00").toLocaleString("en-US", { month: "long" });
+function monthKeys() { const set = []; for (let i=0;i<weekCount();i++){ const k=monthKey(i); if(!set.includes(k)) set.push(k); } return set; }
+const weeksInMonth = k => { const out=[]; for(let i=0;i<weekCount();i++) if(monthKey(i)===k) out.push(i); return out; };
+const curWeek  = () => weekSel  ?? (weekCount() - 1);
+const curMonth = () => monthSel ?? (monthKeys().at(-1));
+const seriesAt = (r, m, i) => r.series?.[m]?.[i] || 0;
+const seriesSum = (r, m, idxs) => idxs.reduce((s,i)=>s+seriesAt(r,m,i),0);
+
+/* ---------- STAT CARD ---------- */
+function statCard(k, value, sub, g, ratio) {
+  const c = el("div", "card stat");
+  const edge = el("div", "edge");
+  if (typeof ratio === "number") {                 // goal-progress bar: fills + shifts red→green
+    const fill = el("div", "fill");
+    fill.style.height = Math.max(4, Math.min(100, ratio * 100)) + "%";
+    fill.style.background = `linear-gradient(to top, ${ratioColor(ratio * 0.5)}, ${ratioColor(ratio)})`;
+    edge.appendChild(fill);
+  } else if (g) { edge.classList.add(g); }
+  c.appendChild(edge);
+  const kk = el("div","k"); kk.textContent = k; c.appendChild(kk);
+  const vv = el("div","v"); vv.textContent = value; c.appendChild(vv);
+  const wrap = el("div");
+  if (g) { const p = el("span","pill "+g); p.textContent = sub; wrap.appendChild(p); }
+  else   { const t = el("div","t"); t.textContent = sub; wrap.appendChild(t); }
+  c.appendChild(wrap);
+  return c;
+}
+
+/* ---------- LEADERBOARD ---------- */
+function board(title, total, rows) {
+  const c = el("div","card board");
+  const h = el("div","bhead");
+  const t = el("div","title"); t.textContent = title; h.appendChild(t);
+  const tot = el("div","total"); tot.textContent = total; h.appendChild(tot);
+  c.appendChild(h);
+  const max = Math.max(...rows.map(r => r.value), 1);
+  rows.forEach((r,i) => {
+    const row = el("div","lb-row");
+    const rk = el("div","rank"); rk.innerHTML = i < 3 ? `<span class="medal">${medal(i)}</span>` : (i+1); row.appendChild(rk);
+    const nm = el("div","name"); nm.textContent = r.name; row.appendChild(nm);
+    const bw = el("div","barwrap");
+    if (typeof r.ib === "number") {                       // split into outbound + inbound
+      bw.classList.add("split");
+      const ob = el("div","bar out"); ob.style.width = (Math.max(0, r.value - r.ib)/max*100)+"%";
+      const ib = el("div","bar in");  ib.style.width = (r.ib/max*100)+"%";
+      bw.append(ob, ib);
+    } else {
+      const b = el("div","bar"); b.style.width = (r.value/max*100)+"%"; bw.appendChild(b);
+    }
+    row.appendChild(bw);
+    const nv = el("div","num");
+    if (typeof r.ib === "number") {                       // show two numbers: outbound + inbound
+      nv.classList.add("num2");
+      const isMoney = typeof r.display === "string" && r.display.includes("$");
+      if (isMoney) nv.classList.add("num2-money");        // wider columns for compact $ values
+      const f = isMoney ? usdk : (v => fmt(Math.round(v)));
+      nv.innerHTML = `<span class="ovn">${f(r.value - r.ib)}</span><span class="ivn">${f(r.ib)}</span>`;
+    } else nv.textContent = r.display ?? fmt(r.value);
+    row.appendChild(nv);
+    c.appendChild(row);
+  });
+  return c;
+}
+
+/* ---------- RENDER ---------- */
+function render() {
+  const reps = DATA.reps.map(r => ({...r}));
+  // per-day figures for the selected weekday: split the latest week across Mon–Fri
+  const di = daySel, lastW = weekCount() - 1;
+  const dailyReps = reps.map(r => {
+    const dDials = r.daily?.dials?.[di] ?? 0;            // real per-day count (null = future day → 0)
+    const dAppts = r.daily?.demos?.[di] ?? 0;
+    const dIbDemos = r.daily?.ibDemos?.[di] ?? 0;        // real inbound demos for the day
+    return { ...r, dDials, dAppts, dIbDemos, dConnects: Math.round(dDials * 0.08) };
+  });
+
+  /* --- HERO: calls per demo (team dials / appts for the selected day) --- */
+  const totDials = dailyReps.reduce((s,r)=>s+r.dDials,0);
+  const totAppts = dailyReps.reduce((s,r)=>s+r.dAppts,0);
+  $("#cpd").textContent = totAppts ? Math.round(totDials/totAppts) : "—";
+  $("#daily-desc").textContent = DAY_LABELS[di] + " · per-rep pace vs ramp/steady targets";
+
+  /* ---------------- DAILY STATS ---------------- */
+  const hasConn = DATA.connectsAvailable;
+  const dConn   = dailyReps.reduce((s,r)=>s+(r.dConnects||0),0);
+  // daily targets (per-rep, summed) — the base tier the weekly/monthly targets scale from
+  const dDialTgt = sumTgt(dailyReps, r => tierTgt(r, "dials", "day"));
+  const dApptTgt = sumTgt(dailyReps, r => tierTgt(r, "demos", "day"));
+  const ds = $("#daily-stats"); ds.innerHTML = "";
+  ds.append(
+    statCard("Dials", fmt(totDials), pct(totDials/dDialTgt)+" of target", grade(totDials,dDialTgt), totDials/dDialTgt),
+    statCard("Demos Booked", fmt(totAppts), pct(totAppts/dApptTgt)+" of target", grade(totAppts,dApptTgt), totAppts/dApptTgt),
+  );
+  if (hasConn) ds.append(statCard("Connects", fmt(dConn), (totDials?Math.round(dConn/totDials*100):0)+"% connect rate", null));
+
+  /* ---------------- DAILY BOARDS ---------------- */
+  const dialsRows = [...dailyReps].sort((a,b)=>b.dDials-a.dDials).map(r=>({name:r.name, value:r.dDials}));
+  const apptRows  = [...dailyReps].sort((a,b)=>b.dAppts-a.dAppts).map(r=>({name:r.name, value:r.dAppts, ib:r.dIbDemos}));
+  const db = $("#daily-boards"); db.innerHTML = "";
+  db.append(board("Dials", fmt(totDials), dialsRows), board("Demos Booked", fmt(totAppts), apptRows));
+
+  /* ---------------- WEEKLY STATS (selected week) ---------------- */
+  const wi = curWeek();
+  const wReps = reps.map(r => ({ ...r,
+    wdials: seriesAt(r, "dials", wi), wdemos: seriesAt(r, "demos", wi), wibdemos: seriesAt(r, "ibDemos", wi),
+    wdeals: seriesAt(r, "deals", wi) }));
+  const wDials = wReps.reduce((s,r)=>s+r.wdials,0);
+  const wDemos = wReps.reduce((s,r)=>s+r.wdemos,0);
+  const wDeals = wReps.reduce((s,r)=>s+r.wdeals,0);
+  // weekly targets = daily × WDAYS (built from the same per-rep base)
+  const wDialTgt = sumTgt(reps, r => tierTgt(r, "dials", "week"));
+  const wDemoTgt = sumTgt(reps, r => tierTgt(r, "demos", "week"));
+  const held = wReps.reduce((s,r)=>s+r.showRate*r.wdemos,0);
+  const wClose = wDemos ? wDeals/wDemos : 0;                 // closed-won deals ÷ demos set
+  $("#weekly-desc").textContent = "Week of " + weekLabel(wi) + " · demos, close rate & pipeline";
+  const ws = $("#weekly-stats"); ws.innerHTML = "";
+  ws.append(
+    statCard("Dials / Wk", fmt(wDials), pct(wDials/wDialTgt)+" of target", grade(wDials,wDialTgt), wDials/wDialTgt),
+    statCard("Demos Booked", fmt(wDemos), pct(wDemos/wDemoTgt)+" of target", grade(wDemos,wDemoTgt), wDemos/wDemoTgt),
+    statCard("Close Rate", pct(wClose), Math.round(wDeals)+" closed / "+wDemos+" set", grade(wClose, TGT.closeSteady), wClose/TGT.closeSteady),
+    statCard("Demos Held", fmt(Math.round(held)), "week of "+weekLabel(wi), null),
+  );
+  const wDemoRows = [...wReps].sort((a,b)=>b.wdemos-a.wdemos).map(r=>({name:r.name, value:r.wdemos, ib:r.wibdemos}));
+  const wDialRows = [...wReps].sort((a,b)=>b.wdials-a.wdials).map(r=>({name:r.name, value:r.wdials}));
+  const wb = $("#weekly-boards"); wb.innerHTML = "";
+  wb.append(board("Dials", fmt(wDials), wDialRows), board("Demos Booked", fmt(wDemos), wDemoRows));
+
+  /* ---------------- MONTHLY STATS (selected month) ---------------- */
+  const mk = curMonth();
+  const midx = weeksInMonth(mk);
+  const mReps = reps.map(r => ({ ...r,
+    mDials: seriesSum(r,"dials",midx), mDemos: seriesSum(r,"demos",midx),
+    mDeals: Math.round(seriesSum(r,"deals",midx)), mArr: seriesSum(r,"arr",midx),
+    mIbArr: seriesSum(r,"ibArr",midx), mIbDeals: seriesSum(r,"ibDeals",midx) }));
+  const mDials = mReps.reduce((s,r)=>s+r.mDials,0);
+  const mDeals = mReps.reduce((s,r)=>s+r.mDeals,0);
+  const mArr   = mReps.reduce((s,r)=>s+r.mArr,0);
+  const mDemos = mReps.reduce((s,r)=>s+r.mDemos,0);
+  $("#monthly-desc").textContent = monthLabel(mk) + " · closed deals & ARR against ramp plan";
+  const ms = $("#monthly-stats"); ms.innerHTML = "";
+  // monthly targets = weekly × weeks-in-this-month; ARR/deals stay anchored to the playbook plan
+  const mWeeks   = midx.length;
+  const mDialTgt = sumTgt(reps, r => tierTgt(r, "dials", "month", mWeeks));
+  const mDemoTgt = sumTgt(reps, r => tierTgt(r, "demos", "month", mWeeks));
+  const mArrTgt  = sumTgt(reps, r => tierTgt(r, "arr",   "month", mWeeks));
+  const mDealTgt = sumTgt(reps, r => tierTgt(r, "deals", "month", mWeeks));
+  ms.append(
+    statCard("Closed Deals", fmt(mDeals), pct(mDeals/mDealTgt)+" of target", grade(mDeals,mDealTgt), mDeals/mDealTgt),
+    statCard("New ARR", usdk(mArr), pct(mArr/mArrTgt)+" of plan", grade(mArr,mArrTgt), mArr/mArrTgt),
+    statCard("Demos / Mo", fmt(mDemos), pct(mDemos/mDemoTgt)+" of target", grade(mDemos,mDemoTgt), mDemos/mDemoTgt),
+    statCard("Dials / Mo", fmt(mDials), pct(mDials/mDialTgt)+" of target", grade(mDials,mDialTgt), mDials/mDialTgt),
+    statCard("Avg Deal", usd(mDeals?mArr/mDeals:0), "per closed deal", null),
+  );
+  const mDealRows = [...mReps].sort((a,b)=>b.mDeals-a.mDeals)
+    .map(r=>({name:r.name, value:r.mDeals, ib:Math.round(r.mIbDeals)}));
+  const mArrRows = [...mReps].sort((a,b)=>b.mArr-a.mArr)
+    .map(r=>({name:r.name, value:r.mArr, ib:r.mIbArr, display:usdk(r.mArr)}));
+  const mb = $("#monthly-boards"); mb.innerHTML = "";
+  mb.append(board("Closed Deals", fmt(mDeals), mDealRows), board("New ARR", usdk(mArr), mArrRows));
+}
+
+/* ---------- biggest deal closed this week (real, from HubSpot) ---------- */
+function renderBigDeal() {
+  const box = $("#home-bigdeal"); if (!box) return;
+  const bd = DATA.bigDeal;
+  if (!bd || !bd.amount) { box.innerHTML = ""; return; }
+  box.innerHTML =
+    `<div class="bigdeal">` +
+      `<div class="trophy">🏆</div>` +
+      `<div class="bd-main">` +
+        `<div class="bd-label">Biggest deal closed this week${bd.company && bd.company !== "—" ? " · " + bd.company : ""}</div>` +
+        `<div class="bd-rev">${usd(bd.amount)}</div>` +
+      `</div>` +
+      `<div class="bd-tags">` +
+        `<div class="bd-tag"><span class="role">AE</span><span class="who">${bd.ae}</span></div>` +
+        `<div class="bd-tag"><span class="role">AM</span><span class="who">${bd.am}</span></div>` +
+        `<div class="bd-tag"><span class="role">BDR</span><span class="who">${bd.bdr}</span></div>` +
+      `</div>` +
+    `</div>`;
+}
+
+/* ---------- AE WEEKLY + MONTHLY (mirror of the BDR tiers, no dials) ----------
+   AEs close, they don't dial — so these tiers track deals, ARR, win rate and
+   quota. Weekly quota = monthly quota ÷ 4; monthly = weekly × weeks-in-month,
+   so the numbers reconcile the same way the BDR targets do. */
+function renderAeViews() {
+  const aes = (DATA.aes || []).map(a => ({ ...a }));
+  if (!aes.length) return;
+  // Uniform AE quota, anchored at the month: every AE closes 50 deals / $150k ARR.
+  // Lower tiers derive so all three reconcile — weekly = monthly ÷ 4, daily = weekly ÷ WDAYS.
+  // AE_ARR_MO_TGT is defined at module scope (shared with the office ARR goal).
+  const AE_DEAL_MO_TGT = 50;
+  const aeArrWkTgt  = a => AE_ARR_MO_TGT / 4;
+  const aeDealWkTgt = a => AE_DEAL_MO_TGT / 4;
+
+  /* AE DAILY (selected weekday) — real per-day closes for the current week from
+     a.daily (Mon→today; future days null → 0). No dials: AEs close, so daily
+     tracks deals & ARR against the daily quota. */
+  const di = daySel, lastW = weekCount() - 1;
+  const dayA = aes.map(a => {
+    const ob = a.daily?.obArr?.[di] ?? 0, ib = a.daily?.ibArr?.[di] ?? 0;
+    return { ...a, dArr: ob + ib, dObArr: ob, dIbArr: ib,
+      dDeals: a.daily?.deals?.[di] ?? 0,
+      dObDeals: a.daily?.obDeals?.[di] ?? 0, dIbDeals: a.daily?.ibDeals?.[di] ?? 0 };
+  });
+  const adDeals = dayA.reduce((s, a) => s + a.dDeals, 0);
+  const adArr   = dayA.reduce((s, a) => s + a.dArr, 0);
+  const adOb    = dayA.reduce((s, a) => s + a.dObDeals, 0);
+  const adIb    = dayA.reduce((s, a) => s + a.dIbDeals, 0);
+  const adDealTgt = aes.reduce((s, a) => s + aeDealWkTgt(a) / WDAYS, 0);
+  const adArrTgt  = aes.reduce((s, a) => s + aeArrWkTgt(a) / WDAYS, 0);
+  const adDesc = $("#ae-daily-desc"); if (adDesc) adDesc.textContent = DAY_LABELS[di] + " · per-AE closing pace vs quota";
+  const ads = $("#ae-daily-stats"); if (ads) {
+    ads.innerHTML = "";
+    ads.append(
+      statCard("Closed Deals", fmt(Math.round(adDeals)), pct(adDeals / adDealTgt) + " of target", grade(adDeals, adDealTgt), adDeals / adDealTgt),
+      statCard("New ARR", usdk(adArr), pct(adArr / adArrTgt) + " of target", grade(adArr, adArrTgt), adArr / adArrTgt),
+      statCard("Outbound Deals", fmt(Math.round(adOb)), "closed today", null),
+      statCard("Inbound Deals", fmt(Math.round(adIb)), "closed today", null),
+      statCard("Avg Deal", usd(adDeals ? adArr / adDeals : 0), "per closed deal", null),
+    );
+  }
+  const adb = $("#ae-daily-boards"); if (adb) {
+    const dealRows = [...dayA].sort((a, b) => b.dDeals - a.dDeals)
+      .map(a => ({ name: a.name, value: Math.round(a.dDeals), ib: Math.round(a.dIbDeals) }));
+    const arrRows = [...dayA].sort((a, b) => b.dArr - a.dArr)
+      .map(a => ({ name: a.name, value: a.dArr, ib: a.dIbArr, display: usdk(a.dArr) }));
+    adb.innerHTML = "";
+    adb.append(board("Closed Deals", fmt(Math.round(adDeals)), dealRows), board("New ARR", usdk(adArr), arrRows));
+  }
+
+  /* AE WEEKLY (selected week) */
+  const wi = curWeek();
+  const wk = aes.map(a => {
+    const ob = seriesAt(a, "obArr", wi), ib = seriesAt(a, "ibArr", wi);
+    return { ...a, wArr: ob + ib, wObArr: ob, wIbArr: ib,
+      wDeals: seriesAt(a, "deals", wi),
+      wObDeals: seriesAt(a, "obDeals", wi), wIbDeals: seriesAt(a, "ibDeals", wi) };
+  });
+  const wDeals = wk.reduce((s, a) => s + a.wDeals, 0);
+  const wArr   = wk.reduce((s, a) => s + a.wArr, 0);
+  const wOb    = wk.reduce((s, a) => s + a.wObDeals, 0);
+  const wIb    = wk.reduce((s, a) => s + a.wIbDeals, 0);
+  const wDealTgt = aes.reduce((s, a) => s + aeDealWkTgt(a), 0);
+  const wArrTgt  = aes.reduce((s, a) => s + aeArrWkTgt(a), 0);
+  const awDesc = $("#ae-weekly-desc"); if (awDesc) awDesc.textContent = "Week of " + weekLabel(wi) + " · deals closed & ARR, inbound vs outbound";
+  const aws = $("#ae-weekly-stats"); if (aws) {
+    aws.innerHTML = "";
+    aws.append(
+      statCard("Closed Deals", fmt(Math.round(wDeals)), pct(wDeals / wDealTgt) + " of target", grade(wDeals, wDealTgt), wDeals / wDealTgt),
+      statCard("New ARR", usdk(wArr), pct(wArr / wArrTgt) + " of target", grade(wArr, wArrTgt), wArr / wArrTgt),
+      statCard("Outbound Deals", fmt(Math.round(wOb)), "closed this week", null),
+      statCard("Inbound Deals", fmt(Math.round(wIb)), "closed this week", null),
+      statCard("Avg Deal", usd(wDeals ? wArr / wDeals : 0), "per closed deal", null),
+    );
+  }
+  const awb = $("#ae-weekly-boards"); if (awb) {
+    const dealRows = [...wk].sort((a, b) => b.wDeals - a.wDeals)
+      .map(a => ({ name: a.name, value: Math.round(a.wDeals), ib: Math.round(a.wIbDeals) }));
+    const arrRows = [...wk].sort((a, b) => b.wArr - a.wArr)
+      .map(a => ({ name: a.name, value: a.wArr, ib: a.wIbArr, display: usdk(a.wArr) }));
+    awb.innerHTML = "";
+    awb.append(board("Closed Deals", fmt(Math.round(wDeals)), dealRows), board("New ARR", usdk(wArr), arrRows));
+  }
+
+  /* AE MONTHLY (selected month) */
+  const mk = curMonth(), midx = weeksInMonth(mk), mWeeks = midx.length;
+  const mo = aes.map(a => {
+    const obArr = seriesSum(a, "obArr", midx), ibArr = seriesSum(a, "ibArr", midx);
+    return { ...a, mArr: obArr + ibArr, mObArr: obArr, mIbArr: ibArr,
+      mDeals: seriesSum(a, "deals", midx),
+      mObDeals: seriesSum(a, "obDeals", midx), mIbDeals: seriesSum(a, "ibDeals", midx) };
+  });
+  const mDeals = mo.reduce((s, a) => s + a.mDeals, 0);
+  const mArr   = mo.reduce((s, a) => s + a.mArr, 0);
+  const mObArr = mo.reduce((s, a) => s + a.mObArr, 0);
+  const mIbArr = mo.reduce((s, a) => s + a.mIbArr, 0);
+  const mDealTgt = aes.reduce((s, a) => s + AE_DEAL_MO_TGT, 0);   // AE count × 50 deals
+  const mArrTgt  = aes.reduce((s, a) => s + AE_ARR_MO_TGT, 0);    // AE count × $150k ARR
+  const amDesc = $("#ae-monthly-desc"); if (amDesc) amDesc.textContent = monthLabel(mk) + " · deals, ARR & sources";
+  const ams = $("#ae-monthly-stats"); if (ams) {
+    ams.innerHTML = "";
+    ams.append(
+      statCard("Closed Deals", fmt(Math.round(mDeals)), pct(mDeals / mDealTgt) + " of target", grade(mDeals, mDealTgt), mDeals / mDealTgt),
+      statCard("New ARR", usdk(mArr), pct(mArr / mArrTgt) + " of target", grade(mArr, mArrTgt), mArr / mArrTgt),
+      statCard("Outbound ARR", usdk(mObArr), "closed this month", null),
+      statCard("Inbound ARR", usdk(mIbArr), "closed this month", null),
+      statCard("Avg Deal", usd(mDeals ? mArr / mDeals : 0), "per closed deal", null),
+    );
+  }
+  const amb = $("#ae-monthly-boards"); if (amb) {
+    const dealRows = [...mo].sort((a, b) => b.mDeals - a.mDeals)
+      .map(a => ({ name: a.name, value: Math.round(a.mDeals), ib: Math.round(a.mIbDeals) }));
+    const arrRows = [...mo].sort((a, b) => b.mArr - a.mArr)
+      .map(a => ({ name: a.name, value: a.mArr, ib: a.mIbArr, display: usdk(a.mArr) }));
+    amb.innerHTML = "";
+    amb.append(board("Closed Deals", fmt(Math.round(mDeals)), dealRows), board("New ARR", usdk(mArr), arrRows));
+  }
+}
+
+/* ---------- HOME: two role cards + team ARR bar ---------- */
+function renderHome() {
+  const reps = DATA.reps || [], aes = DATA.aes || [];
+  const wi = curWeek();                                          // current week (Mon→today)
+  const bdrDemosSetMo    = reps.reduce((s, r) => s + seriesAt(r, "demos", wi), 0);   // demos booked this week
+  const bdrDemosClosedMo = reps.reduce((s, r) => s + seriesAt(r, "deals", wi), 0);   // BDR-sourced deals that closed won
+  const bdrArrMo         = reps.reduce((s, r) => s + seriesAt(r, "arr", wi), 0);     // ARR closed this week
+  const aeDealsMo  = aes.reduce((s, a) => s + seriesAt(a, "deals", wi), 0);
+  const aeArrMo    = aes.reduce((s, a) => s + seriesAt(a, "obArr", wi) + seriesAt(a, "ibArr", wi), 0);
+  const aeAvgDeal  = aeDealsMo ? aeArrMo / aeDealsMo : 0;         // avg closed deal size this week
+  // TEAM = union of every closed-won deal an SF BDR sourced OR an SF AE closed this
+  // week (Mon→Sun), counted once — deduped on the backend so overlaps aren't doubled.
+  const teamDealsWk = DATA.team ? (DATA.team.deals[wi] || 0) : aeDealsMo;
+  const teamArrWk   = DATA.team ? (DATA.team.arr[wi]   || 0) : aeArrMo;
+
+  // One card, three lenses on this week (Mon→today). Team = combined weekly totals,
+  // then the BDR and AE breakdowns. Toggling swaps the body without a re-fetch.
+  const VIEWS = {
+    team: { emoji: "🏙️", role: (reps.length + aes.length) + " reps · this week", title: "SF Team", goto: null, cta: null,
+      stats: [
+        [fmt(Math.round(teamDealsWk)), "Deals closed / wk"],
+        [usdk(teamArrWk), "ARR generated / wk"],
+        [fmt(Math.round(bdrDemosSetMo)), "Demos set / wk"],
+      ] },
+    bdr: { emoji: "📞", role: reps.length + " reps · sourcing", title: "BDR Team", goto: "bdr", cta: "Open BDR dashboard",
+      stats: [
+        [fmt(Math.round(bdrDemosSetMo)), "Demos set / wk"],
+        [fmt(Math.round(bdrDemosClosedMo)), "Demos closed / wk"],
+        [usdk(bdrArrMo), "ARR closed / wk"],
+      ] },
+    ae: { emoji: "🤝", role: aes.length + " reps · closing", title: "AE Team", goto: "ae", cta: "Open AE dashboard",
+      stats: [
+        [fmt(Math.round(aeDealsMo)), "Deals closed / wk"],
+        [usdk(aeArrMo), "ARR generated / wk"],
+        [usd(aeAvgDeal), "Avg deal size"],
+      ] },
+  };
+  const cards = $("#home-cards");
+  if (cards) {
+    const bodyHtml = (v) => {
+      const d = VIEWS[v];
+      return `<div class="tc-body">` +
+        `<div class="tc-head"><div class="tc-id"><span class="rc-emoji">${d.emoji}</span>` +
+          `<div><div class="rc-role">${d.role}</div><div class="rc-title">${d.title}</div></div></div>` +
+          `<div class="toggle" id="home-toggle">` +
+            ["team", "bdr", "ae"].map(k =>
+              `<button data-hv="${k}"${k === v ? ' class="active"' : ""}>${k === "team" ? "Team" : k.toUpperCase()}</button>`).join("") +
+          `</div></div>` +
+        `<div class="rc-stats">` + d.stats.map(([val, k]) =>
+          `<div class="rc-stat"><div class="rv">${val}</div><div class="rk">${k}</div></div>`).join("") + `</div>` +
+        (d.cta ? `<div class="rc-cta" data-goto="${d.goto}">${d.cta} →</div>` : "") +
+      `</div>`;
+    };
+    const paint = (v) => {
+      window.__homeView = v;                              // remember lens across re-renders
+      cards.innerHTML = `<div class="card teamcard">${bodyHtml(v)}</div>`;
+      cards.querySelectorAll("#home-toggle button").forEach(b =>
+        b.addEventListener("click", () => paint(b.dataset.hv)));
+      const cta = cards.querySelector(".rc-cta");
+      if (cta) cta.addEventListener("click", () => showRole(cta.dataset.goto));
+    };
+    paint(window.__homeView || "team");
+  }
+  renderBigDeal();
+
+  // ONE uniform team number, straight from the server (every Closed-Won deal this
+  // month, counted once, split by source) — identical to the landing-page ring, so
+  // the two can never diverge. Falls back to the BDR-sourced roll-up in demo/shell
+  // mode where the live teamMonth field is absent.
+  const tm = DATA.teamMonth;
+  const { total, outbound, inbound } = tm
+    ? { outbound: tm.obArrMo || 0, inbound: tm.ibArrMo || 0, total: (tm.obArrMo || 0) + (tm.ibArrMo || 0) }
+    : teamGoalData();
+  const goal = officeArrGoal("bdr");                       // fixed $650k office target
+  const ratio = Math.min(1, total / goal);
+  const box = $("#home-goal");
+  if (box) box.innerHTML =
+    `<div class="card board"><div class="bhead"><div class="title">Total Team ARR</div><div class="total">${Math.round(ratio * 100)}%</div></div>` +
+      goalBarMarked(total, outbound, inbound, goal) +
+      `<div class="ring-sub" style="margin-top:6px">${usdk(total)} of ${usdk(goal)} closed this month · ${usdk(Math.max(0, goal - total))} to go</div>` +
+      `<div class="ring-legend" style="justify-content:flex-start;margin:8px 0 0">` +
+        `<span class="lg"><span class="sw out"></span>Outbound <b>${usdk(outbound)}</b></span>` +
+        `<span class="lg"><span class="sw in"></span>Inbound <b>${usdk(inbound)}</b></span>` +
+      `</div>` +
+    `</div>`;
+}
+
+/* ---------- filter bars: reusable scrollable dropdown popup ----------
+   One builder drives the day/week/month pickers on both the BDR and AE pages. */
+function buildDropdown(container, label, options, activeVal, onPick) {
+  container.innerHTML = "";
+  const dd = el("div", "wk-dropdown");
+  const trigger = el("button", "tab wk-trigger");
+  trigger.innerHTML = `<span>${label}</span><span class="caret">▾</span>`;
+  const menu = el("div", "wk-menu"); menu.hidden = true;
+  options.forEach(opt => {
+    const o = el("button", "wk-opt" + (opt.val === activeVal ? " active" : ""));
+    o.textContent = opt.label;
+    o.addEventListener("click", (e) => { e.stopPropagation(); onPick(opt.val); });
+    menu.appendChild(o);
+  });
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+    if (!menu.hidden) { const a = menu.querySelector(".wk-opt.active"); if (a) a.scrollIntoView({ block: "nearest" }); }
+  });
+  dd.append(trigger, menu);
+  container.appendChild(dd);
+}
+
+function renderFilters() {
+  const wi = curWeek(), mkNow = curMonth();
+  const weekOpts = []; for (let i = weekCount() - 1; i >= 0; i--) weekOpts.push({ val: i, label: "Week of " + weekLabel(i) });
+  const monthOpts = [...monthKeys()].reverse().map(k => ({ val: k, label: monthLabel(k) }));
+  const dayOpts = DAY_LABELS.slice(0, TODAY_IDX + 1).map((l, i) => ({ val: i, label: l }));
+
+  ["#daily-filter", "#ae-daily-filter"].forEach(id => {
+    const c = $(id); if (c) buildDropdown(c, DAY_LABELS[daySel], dayOpts, daySel, v => { daySel = v; rerender(); });
+  });
+  ["#weekly-filter", "#ae-weekly-filter"].forEach(id => {
+    const c = $(id); if (c) buildDropdown(c, "Week of " + weekLabel(wi), weekOpts, wi, v => { weekSel = v; rerender(); });
+  });
+  ["#monthly-filter", "#ae-monthly-filter"].forEach(id => {
+    const c = $(id); if (c) buildDropdown(c, monthLabel(mkNow), monthOpts, mkNow, v => { monthSel = v; rerender(); });
+  });
+}
+/* ---------- admin roster: leadership adds / removes BDRs, AEs + AMs ---------- */
+const DEFAULT_AMS = ["Nadia Fields", "Grant Holloway", "Simone Park", "Yusuf Rahman"];
+let AM_ROSTER = [...DEFAULT_AMS];
+let BASE_REPS = [];                        // BDRs from the data source, before edits
+let BASE_AES  = [];                        // AEs  from the data source, before edits
+const ROSTER_KEY = "sfRoster";
+function loadRoster() {
+  const empty = { repAdd:[], repRemove:[], aeAdd:[], aeRemove:[], amAdd:[], amRemove:[], rename:{} };
+  try { return { ...empty, ...(JSON.parse(localStorage.getItem(ROSTER_KEY)) || {}) }; }
+  catch { return { ...empty }; }
+}
+let ROSTER = loadRoster();
+function saveRoster() { try { localStorage.setItem(ROSTER_KEY, JSON.stringify(ROSTER)); } catch {} }
+// admin-added reps get a modest default sample pipeline so they render
+function defaultRepDef(name) {
+  return { name, stage:"ramp", start:0, dials:1700, demos:7, arr:2000, deals:0.6, g:0.08, show:0.68, ib:0.12 };
+}
+function defaultAeDef(name, quotaMo, dealsQuotaMo) {
+  return { name, start:0, dealsWk:1.1, arrWk:7000, obShare:0.65, g:0.06,
+           winRate:0.35, cycleDays:30, quotaMo: quotaMo || 150000, dealsQuotaMo: dealsQuotaMo || 50 };
+}
+// recompute the effective BDR + AE + AM lists from the base data + saved edits
+function applyRoster() {
+  const repGone = new Set((ROSTER.repRemove || []).map(n => n.toLowerCase()));
+  const baseReps = BASE_REPS.filter(r => !repGone.has(r.name.toLowerCase()));
+  const haveRep  = new Set(baseReps.map(r => r.name.toLowerCase()));
+  // skip admin-adds already present in the live data (prevents duplicate names)
+  const repAdds = (ROSTER.repAdd || [])
+    .filter(d => !haveRep.has(d.name.toLowerCase()))
+    .map(d => {
+      const rep = SHELL.buildRep(defaultRepDef(d.name));
+      // newly-added BDRs ramp for their first 30 days, then move to steady targets
+      rep.stage = (d.addedAt && Date.now() - d.addedAt >= 30 * 864e5) ? "steady" : "ramp";
+      return rep;
+    });
+  DATA.reps = baseReps.concat(repAdds);
+  const aeGone = new Set((ROSTER.aeRemove || []).map(n => n.toLowerCase()));
+  const baseAes = BASE_AES.filter(a => !aeGone.has(a.name.toLowerCase()));
+  const haveAe  = new Set(baseAes.map(a => a.name.toLowerCase()));
+  const aeAdds = (ROSTER.aeAdd || [])
+    .filter(d => !haveAe.has(d.name.toLowerCase()))
+    .map(d => SHELL.buildAe(defaultAeDef(d.name, d.quotaMo, d.dealsQuotaMo)));
+  DATA.aes = baseAes.concat(aeAdds);
+  const amGone = new Set((ROSTER.amRemove || []).map(n => n.toLowerCase()));
+  const seen = new Set();
+  AM_ROSTER = [...DEFAULT_AMS, ...(ROSTER.amAdd || [])].filter(n => {
+    const lc = n.toLowerCase();
+    if (amGone.has(lc) || seen.has(lc)) return false;
+    seen.add(lc); return true;
+  });
+  // admin name overrides (Edit) — display-only rename keyed by original name
+  const applyName = n => (ROSTER.rename && ROSTER.rename[n.toLowerCase()]) || n;
+  DATA.reps = DATA.reps.map(r => ({ ...r, name: applyName(r.name) }));
+  DATA.aes  = DATA.aes.map(a => ({ ...a, name: applyName(a.name) }));
+  AM_ROSTER = AM_ROSTER.map(applyName);
+}
+// after any edit: re-apply, then refresh every roster-driven view
+function refreshRoster() {
+  applyRoster();
+  if (bdrIdx >= (DATA.reps || []).length) bdrIdx = 0;
+  if (aeIdx  >= (DATA.aes  || []).length) aeIdx  = 0;
+  render(); renderAeViews(); renderFilters(); renderHome(); renderBigDeal();
+  window.renderBdrSelect && window.renderBdrSelect();
+  window.renderBdr && window.renderBdr();
+  window.renderAeSelect && window.renderAeSelect();
+  window.renderAe && window.renderAe();
+  window.renderGoal && window.renderGoal();
+  window.renderTrends && window.renderTrends();
+  renderAdmin();
+}
+// config per roster kind (BDR/AE store {name} defs; AM stores plain names)
+const ROSTER_CFG = {
+  bdr: { add:"repAdd", rem:"repRemove", obj:true,  names:()=>(DATA.reps||[]).map(r=>r.name) },
+  ae:  { add:"aeAdd",  rem:"aeRemove",  obj:true,  names:()=>(DATA.aes ||[]).map(a=>a.name) },
+  am:  { add:"amAdd",  rem:"amRemove",  obj:false, names:()=>AM_ROSTER },
+};
+function addMember(kind, name) {
+  name = (name || "").trim(); if (!name) return;
+  const cfg = ROSTER_CFG[kind]; if (!cfg) return;
+  const lc = name.toLowerCase();
+  const remList = ROSTER[cfg.rem] || [];
+  if (remList.some(n => n.toLowerCase() === lc))
+    ROSTER[cfg.rem] = remList.filter(n => n.toLowerCase() !== lc);          // un-hide a base member
+  else if (!cfg.names().some(n => n.toLowerCase() === lc))
+    ROSTER[cfg.add] = [...(ROSTER[cfg.add] || []), cfg.obj ? { name, addedAt: Date.now() } : name];
+  else return;                                                             // already active
+  saveRoster(); refreshRoster();
+}
+function removeMember(kind, name) {
+  const cfg = ROSTER_CFG[kind]; if (!cfg) return;
+  const lc = name.toLowerCase();
+  const addList = ROSTER[cfg.add] || [];
+  const nameOf = m => (cfg.obj ? m.name : m).toLowerCase();
+  if (addList.some(m => nameOf(m) === lc))
+    ROSTER[cfg.add] = addList.filter(m => nameOf(m) !== lc);                // drop an admin-added member
+  else if (!(ROSTER[cfg.rem] || []).some(n => n.toLowerCase() === lc))
+    ROSTER[cfg.rem] = [...(ROSTER[cfg.rem] || []), name];                   // hide a base member
+  saveRoster(); refreshRoster();
+}
+function renameMember(kind, name) {
+  if (!ROSTER_CFG[kind]) return;
+  const next = (prompt(`Rename "${name}" to:`, name) || "").trim();
+  if (!next || next === name) return;
+  ROSTER.rename = ROSTER.rename || {};
+  ROSTER.rename[name.toLowerCase()] = next;
+  saveRoster(); refreshRoster();
+}
+function renderAdmin() {
+  const rows = (kind, names) => names.length
+    ? names.map(n => { const dn = n.replace(/"/g,'&quot;'); return `<div class="roster-row"><span class="rn">${n}</span>` +
+        `<span class="roster-actions">` +
+          `<button class="roster-edit" data-kind="${kind}" data-name="${dn}">Edit</button>` +
+          `<button class="roster-del" data-kind="${kind}" data-name="${dn}">Remove</button>` +
+        `</span></div>`; }).join("")
+    : `<div class="roster-empty">None yet — add one above.</div>`;
+  const set = (listId, cntId, kind, names) => {
+    const box = $(listId); if (box) box.innerHTML = rows(kind, names);
+    const cnt = $(cntId);  if (cnt) cnt.textContent = names.length;
+  };
+  set("#admin-bdr-list", "#admin-bdr-count", "bdr", (DATA.reps || []).map(r => r.name));
+  set("#admin-ae-list",  "#admin-ae-count",  "ae",  (DATA.aes  || []).map(a => a.name));
+  set("#admin-am-list",  "#admin-am-count",  "am",  AM_ROSTER);
+}
+
+/* ---------- admin password gate ---------- */
+const ADMIN_PW = "fugazers";
+const ADMIN_AUTH_KEY = "sfAdminAuthed";
+let adminAuthed = false;
+try { adminAuthed = sessionStorage.getItem(ADMIN_AUTH_KEY) === "1"; } catch {}
+function renderAdminGate() {
+  const gate = $("#admin-gate"), content = $("#admin-content");
+  if (!gate || !content) return;
+  gate.hidden = adminAuthed;
+  content.hidden = !adminAuthed;
+  if (adminAuthed) renderAdmin();
+  else { const pw = $("#admin-pw"); if (pw) { pw.value = ""; pw.focus(); } }
+}
+function tryUnlock() {
+  const pw = $("#admin-pw"), err = $("#admin-err"); if (!pw) return;
+  if (pw.value === ADMIN_PW) {
+    adminAuthed = true;
+    try { sessionStorage.setItem(ADMIN_AUTH_KEY, "1"); } catch {}
+    if (err) err.hidden = true;
+    renderAdminGate();
+  } else { if (err) err.hidden = false; pw.value = ""; pw.focus(); }
+}
+// wire the add inputs, list remove buttons + password gate (elements exist at eval)
+(function wireAdmin() {
+  const bind = (btnId, inpId, kind) => {
+    const btn = $(btnId), inp = $(inpId);
+    if (btn && inp) {
+      btn.addEventListener("click", () => { addMember(kind, inp.value); inp.value = ""; inp.focus(); });
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") { addMember(kind, inp.value); inp.value = ""; } });
+    }
+  };
+  bind("#admin-bdr-addbtn", "#admin-bdr-add", "bdr");
+  bind("#admin-ae-addbtn",  "#admin-ae-add",  "ae");
+  bind("#admin-am-addbtn",  "#admin-am-add",  "am");
+  document.querySelectorAll("#admin-bdr-list, #admin-ae-list, #admin-am-list").forEach(box =>
+    box.addEventListener("click", e => {
+      const ed = e.target.closest(".roster-edit"); if (ed) { renameMember(ed.dataset.kind, ed.dataset.name); return; }
+      const b = e.target.closest(".roster-del"); if (b) removeMember(b.dataset.kind, b.dataset.name);
+    }));
+  const unlock = $("#admin-unlock"), pw = $("#admin-pw");
+  if (unlock) unlock.addEventListener("click", tryUnlock);
+  if (pw) pw.addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+})();
+
+// re-render every selection-driven view (BDR + AE) after a filter change
+function rerender() { render(); renderAeViews(); renderFilters(); }
+// close any popup on an outside click
+document.addEventListener("click", () => document.querySelectorAll(".wk-menu").forEach(m => m.hidden = true));
+
+/* ---------- interactions ---------- */
+document.querySelectorAll("#theme button").forEach(b => b.addEventListener("click", () => {
+  document.documentElement.setAttribute("data-theme", b.dataset.th);
+  document.querySelectorAll("#theme button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+}));
+
+/* ---------- navigation: role pages (Home · BDRs · AEs) + per-page views ---------- */
+function showRole(role) {
+  document.querySelectorAll(".page").forEach(p => { p.style.display = p.dataset.role === role ? "" : "none"; });
+  document.querySelectorAll("#rolenav .tab.role").forEach(b => b.classList.toggle("active", b.dataset.role === role));
+  if (role === "admin") renderAdminGate();
+  window.scrollTo(0, 0);
+}
+function showView(v) {   // BDR page sub-views
+  document.querySelectorAll("#page-bdr section.section[data-view]").forEach(s => {
+    s.style.display = s.dataset.view === v ? "" : "none";
+  });
+  document.querySelectorAll("#viewnav .tab.view").forEach(b => b.classList.toggle("active", b.dataset.view === v));
+  window.scrollTo(0, 0);
+}
+function showAeView(v) { // AE page sub-views
+  document.querySelectorAll("#page-ae section.section[data-aeview]").forEach(s => {
+    s.style.display = s.dataset.aeview === v ? "" : "none";
+  });
+  document.querySelectorAll("#ae-viewnav .tab.aeview").forEach(b => b.classList.toggle("active", b.dataset.aeview === v));
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("#rolenav .tab.role").forEach(b => b.addEventListener("click", () => showRole(b.dataset.role)));
+document.querySelectorAll("#viewnav .tab.view").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
+document.querySelectorAll("#ae-viewnav .tab.aeview").forEach(b => b.addEventListener("click", () => showAeView(b.dataset.aeview)));
+showRole("home"); showView("daily"); showAeView("ae-daily");
+
+/* ---------- loading overlay ----------
+   The first (cold) fetch pulls live HubSpot data and can take up to a minute.
+   Show a branded "loading" screen so the dashboard never looks frozen or blank
+   while we wait. It's removed as soon as data (or the sample fallback) is ready. */
+function showLoading() {
+  if (document.getElementById("sf-loading")) return;
+  const el = document.createElement("div");
+  el.id = "sf-loading";
+  el.setAttribute("style",
+    "position:fixed;inset:0;z-index:9999;display:grid;place-items:center;" +
+    "background:var(--bg);color:var(--text);gap:0;transition:opacity .35s ease;");
+  el.innerHTML =
+    '<div style="text-align:center;display:grid;gap:16px;justify-items:center;">' +
+      '<div style="width:34px;height:34px;border-radius:50%;border:3px solid var(--accent-soft);' +
+        'border-top-color:var(--accent);animation:sfspin 0.9s linear infinite;"></div>' +
+      '<div style="font-size:13px;letter-spacing:.3px;color:var(--text);font-weight:600;">Loading live data…</div>' +
+      '<div style="font-size:11px;color:var(--text-dim);max-width:260px;line-height:1.5;">' +
+        'Pulling the latest numbers from HubSpot. The first load can take up to a minute.</div>' +
+    '</div>' +
+    '<style>@keyframes sfspin{to{transform:rotate(360deg)}}</style>';
+  document.body.appendChild(el);
+}
+function hideLoading() {
+  const el = document.getElementById("sf-loading");
+  if (!el) return;
+  el.style.opacity = "0";
+  setTimeout(() => el.remove(), 400);
+}
+
+/* ---------- load live data from HubSpot, then render everything ---------- */
+async function load() {
+  showLoading();
+  let shell = false;
+  try {
+    const res = await fetch("/api/sf-metrics");
+    DATA = await res.json();
+    if (DATA.error || !DATA.reps?.length) throw new Error(DATA.error || "no data");
+  } catch (e) {
+    DATA = SHELL;               // placeholder numbers until HubSpot is wired up
+    shell = true;
+  }
+  BASE_REPS = (DATA.reps || []).slice();  // remember the source roster, then apply admin edits
+  BASE_AES  = (DATA.aes  || []).slice();
+  applyRoster();
+  const t = new Date(DATA.updatedAt || Date.now());
+  const dateStr = t.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const timeStr = t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  $("#ts").textContent = `${dateStr} · ${timeStr}`;
+  render();
+  renderAeViews();
+  renderFilters();
+  renderHome();
+  renderAdmin();
+  window.renderTrends && window.renderTrends();
+  window.renderBdrSelect && window.renderBdrSelect();
+  window.renderBdr && window.renderBdr();
+  window.renderAeSelect && window.renderAeSelect();
+  window.renderAe && window.renderAe();
+  window.renderGoal && window.renderGoal();
+  if (shell) {
+    document.querySelectorAll(".dot").forEach(d => d.style.background = "var(--warn)");
+    const badge = document.querySelector('.tabs .office-badge:last-of-type');
+    if (badge) { badge.style.color = "var(--warn)"; badge.textContent = "● Sample data — connect HubSpot"; }
+  }
+  hideLoading();
+}
+load();
+</script>
+
+<!-- ================================================================
+     PER-BDR TRENDS  (small-multiples sparklines)
+     Weekly series come straight from HubSpot (DATA.reps[].series).
+     ================================================================ -->
+<script>
+let metric = "dials";
+const isArr = () => metric === "arr";
+const kfmt   = n => isArr() ? "$"+Math.round(n/1000)+"K" : (n>=1000 ? (Math.round(n/100)/10)+"k" : String(Math.round(n)));
+const totFmt = n => isArr() ? "$"+Math.round(n/1000)+"K" : (n>=1000 ? Math.round(n/1000)+"k" : String(Math.round(n)));
+
+window.renderTrends = function(){
+  const reps = DATA.reps || [];
+  const grid = document.getElementById("spark-grid"); grid.innerHTML = "";
+
+  // shared Y max across all reps for the selected metric
+  let ymax = 0;
+  reps.forEach(r => (r.series?.[metric]||[]).forEach(v => { if (v>ymax) ymax=v; }));
+  const step = isArr() ? 5000 : (ymax>10000 ? 5000 : 1000);
+  ymax = Math.max(step, Math.ceil(ymax/step)*step);
+
+  const W=260, H=62, pad=3;
+  // weekly section → the badge shows THIS week (latest bucket), not the all-time sum
+  const rows = reps
+    .map(r => { const s=r.series?.[metric]||[]; return { r, s, wk: s.length ? (s[s.length-1]||0) : 0 }; })
+    .sort((a,b) => b.wk - a.wk);
+
+  rows.forEach(({r,s,wk}) => {
+    const n = s.length || 1;
+    const X = i => (pad + i*(W-2*pad)/Math.max(1,n-1));
+    const Y = v => ((H-pad) - (v/ymax)*(H-2*pad));
+    let line="", area=`M ${X(0).toFixed(1)} ${H-pad} `;
+    s.forEach((v,i) => { const px=X(i).toFixed(1), py=Y(v).toFixed(1); line += (i?"L":"M")+` ${px} ${py} `; area += `L ${px} ${py} `; });
+    area += `L ${X(n-1).toFixed(1)} ${H-pad} Z`;
+    const rx = X(Math.max(0, r.startWeek|0)).toFixed(1);
+
+    const cell = document.createElement("div"); cell.className = "spark";
+    cell.innerHTML =
+      `<div class="sh"><span class="nm">${r.name}</span><span class="tot">${totFmt(wk)}</span></div>`+
+      `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`+
+        `<text class="axis" x="0" y="9">${kfmt(ymax)}</text>`+
+        `<text class="axis" x="0" y="${H-2}">0</text>`+
+        `<line class="spark-rule" x1="${rx}" y1="0" x2="${rx}" y2="${H}"/>`+
+        `<path class="spark-area" d="${area}"/>`+
+        `<path class="spark-line" d="${line}"/>`+
+      `</svg>`;
+    grid.appendChild(cell);
+  });
+
+  // summary cards (This week / BDRs Shown / Buckets / Data Begins)
+  const grand  = rows.reduce((a,b)=>a+b.wk,0);
+  const active = rows.filter(x=>x.wk>0).length;
+  const label  = metric==="dials" ? "Dials this week" : metric==="demos" ? "Demos Booked this week" : "New ARR this week";
+  const card = (k,v,t)=>`<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div><div class="t">${t}</div></div>`;
+  document.getElementById("trends-summary").innerHTML =
+      card(label, totFmt(grand), "current week")
+    + card("BDRs Shown", String(reps.length), active+" active this week")
+    + card("Buckets", String(DATA.weeks||0), "week")
+    + card("Data Begins", DATA.rangeStart||"—", "earliest rolled-up week");
+};
+
+document.querySelectorAll(".tab.metric").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".tab.metric").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active"); metric = b.dataset.metric; window.renderTrends();
+}));
+</script>
+
+<!-- ================================================================
+     PER-BDR PROGRESSION  —  one rep at a time, month by month
+     ================================================================ -->
+<script>
+let bdrIdx = 0;
+let bdrSrc = "all";   // "all" | "out" | "in"  — inbound/outbound filter
+
+/* KPI weighting — how an elite (top-0.0001%) sales leader scores a BDR.
+   Revenue is king, closed deals prove conversion, demos are the leading
+   indicator they control. Monthly on-target benchmarks normalise each KPI. */
+const KPI_W = { arr: 0.50, deals: 0.30, demos: 0.20 };
+const KPI_T = { arr: 30000, deals: 6, demos: 40 };   // 100 = fully hitting monthly targets
+
+// roll a weekly series into calendar-month totals using week dates
+function monthlyRollup(series, rangeStartISO) {
+  const start = new Date((rangeStartISO || "") + "T00:00:00");
+  const map = new Map();
+  (series || []).forEach((v, i) => {
+    const d = new Date(start); d.setDate(start.getDate() + i * 7);
+    const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    const cur = map.get(key) || { label: d.toLocaleString("en-US", { month: "short" }), value: 0 };
+    cur.value += v; map.set(key, cur);
+  });
+  return [...map.values()];
+}
+
+// one month-by-month bar chart card
+function monthChart(title, sub, months, fmtFn, cls = "") {
+  const max = Math.max(1, ...months.map(m => m.value));
+  const bars = months.map(m => {
+    const h = Math.max(3, Math.round(m.value / max * 100));
+    return `<div class="mbar"><div class="mv">${fmtFn(m.value)}</div>` +
+           `<div class="col" style="height:${h}%"></div><div class="ml">${m.label}</div></div>`;
+  }).join("");
+  return `<div class="card mchart ${cls}"><div class="ct">${title} <small>· ${sub}</small></div>` +
+         `<div class="mbars">${bars}</div></div>`;
+}
+
+window.renderBdrSelect = function () {
+  const wrap = document.getElementById("bdr-select");
+  if (!wrap) return;
+  const reps = DATA.reps || [];
+  if (bdrIdx >= reps.length) bdrIdx = 0;
+  const opts = reps.map((r, i) => ({ val: i, label: r.name }));
+  buildDropdown(wrap, reps[bdrIdx]?.name || "Select BDR", opts, bdrIdx,
+    i => { bdrIdx = i; window.renderBdrSelect(); window.renderBdr(); });
+};
+
+window.renderBdr = function () {
+  const r = (DATA.reps || [])[bdrIdx];
+  const box = document.getElementById("bdr-detail");
+  if (!r) { box.innerHTML = ""; return; }
+  const rs = DATA.rangeStart;
+  const src = bdrSrc;
+  const pick = (all, ob, ib) => src === "out" ? ob : src === "in" ? ib : all;
+  const srcLabel = src === "out" ? "outbound" : src === "in" ? "inbound" : "all sources";
+
+  // month-by-month KPI series (deals + ARR follow the source filter)
+  const dealsM = monthlyRollup(pick(r.series?.deals, r.series?.obDeals, r.series?.ibDeals), rs);
+  const arrM   = monthlyRollup(pick(r.series?.arr,   r.series?.obArr,   r.series?.ibArr),   rs);
+  const demosM = monthlyRollup(r.series?.demos, rs);
+  // source-split series (shown in the "All" view only)
+  const obDM = monthlyRollup(r.series?.obDeals, rs).map(m => ({ ...m, value: Math.round(m.value) }));
+  const ibDM = monthlyRollup(r.series?.ibDeals, rs).map(m => ({ ...m, value: Math.round(m.value) }));
+  const obAM = monthlyRollup(r.series?.obArr, rs);
+  const ibAM = monthlyRollup(r.series?.ibArr, rs);
+
+  // weighted composite score — always on TOTAL performance, not the filter
+  const tDealsM = monthlyRollup(r.series?.deals, rs);
+  const tArrM   = monthlyRollup(r.series?.arr,   rs);
+  const scoreM = tDealsM.map((d, i) => ({ label: d.label, value: Math.round(100 * (
+      KPI_W.arr   * ((tArrM[i]?.value  || 0) / KPI_T.arr) +
+      KPI_W.deals * ((d.value          || 0) / KPI_T.deals) +
+      KPI_W.demos * ((demosM[i]?.value || 0) / KPI_T.demos))) }));
+  const avgScore = scoreM.length ? Math.round(scoreM.reduce((s, m) => s + m.value, 0) / scoreM.length) : 0;
+
+  // top cards are all-time totals — they sum the same monthly bars shown in the charts below
+  const dealsAll = dealsM.reduce((s, m) => s + m.value, 0);
+  const arrAll   = arrM.reduce((s, m) => s + m.value, 0);
+  const demosAll = demosM.reduce((s, m) => s + m.value, 0);
+  const dialsAll = (r.series?.dials || []).reduce((s, v) => s + v, 0);
+  const closeRate = demosAll ? dealsAll / demosAll : 0;      // closed-won deals ÷ demos set (all time)
+  const stats = [
+    ["BDR Score", avgScore, "all time avg · weighted"],
+    ["Deals", fmt(Math.round(dealsAll)), srcLabel + " · all time"],
+    ["New ARR", usdk(arrAll), srcLabel + " · all time"],
+    ["Demos Booked", fmt(Math.round(demosAll)), "all time"],
+    ["Close Rate", pct(closeRate), Math.round(dealsAll) + " closed / " + Math.round(demosAll) + " set"],
+    ["Dials", fmt(dialsAll), "all time"],
+  ];
+
+  const seg = [["all", "All"], ["out", "Outbound"], ["in", "Inbound"]].map(([s, lbl]) =>
+    `<button class="tab src${s === src ? " active" : ""}" data-src="${s}">${lbl}</button>`).join("");
+
+  box.innerHTML =
+    `<div class="bdr-head"><span class="who">${r.name}</span>` +
+      `<span class="stage-pill ${r.stage}">${r.stage}</span>` +
+      `<span class="tabs src-seg">${seg}</span></div>` +
+    `<div class="grid stats">` + stats.map(([k, v, t]) =>
+        `<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div><div class="t">${t}</div></div>`).join("") + `</div>` +
+    `<div class="bdr-charts">` +
+      monthChart("Deals Closed", srcLabel + " · month over month", dealsM, v => String(Math.round(v))) +
+      monthChart("New ARR", srcLabel + " · month over month", arrM, v => usdk(v)) +
+      (src === "all" ? monthChart2("Deals by Source", "outbound vs inbound", obDM, ibDM, v => String(Math.round(v))) : "") +
+      (src === "all" ? monthChart2("ARR by Source", "outbound vs inbound", obAM, ibAM, v => usdk(v)) : "") +
+      monthChart("Demos Booked", "month over month", demosM, v => String(Math.round(v))) +
+      monthChart("Overall BDR Score", "ARR 50% · Deals 30% · Demos 20% · 100 = on-target", scoreM, v => String(Math.round(v)), "score") +
+    `</div>`;
+
+  box.querySelectorAll(".tab.src").forEach(b =>
+    b.addEventListener("click", () => { bdrSrc = b.dataset.src; window.renderBdr(); }));
+};
+</script>
+
+<!-- ================================================================
+     PER-AE PERFORMANCE  —  deals + inbound/outbound ARR, month by month
+     ================================================================ -->
+<script>
+let aeIdx = 0;
+
+// two-series grouped monthly bar chart (outbound=accent, inbound=blue)
+function monthChart2(title, sub, mOut, mIn, fmtFn) {
+  const max = Math.max(1, ...mOut.map((m,i)=>m.value + (mIn[i]?.value||0)));
+  const bars = mOut.map((m,i) => {
+    const ov = m.value, iv = mIn[i]?.value || 0;
+    const oh = Math.max(2, Math.round(ov/max*100)), ih = Math.max(2, Math.round(iv/max*100));
+    return `<div class="mbar mbar2">` +
+      `<div class="mv mv2"><span class="ovn">${fmtFn(ov)}</span><span class="ivn">${fmtFn(iv)}</span></div>` +
+      `<div class="cols2">` +
+        `<div class="col out" style="height:${oh}%" title="Outbound ${fmtFn(ov)}"></div>` +
+        `<div class="col in"  style="height:${ih}%" title="Inbound ${fmtFn(iv)}"></div>` +
+      `</div><div class="ml">${m.label}</div></div>`;
+  }).join("");
+  return `<div class="card mchart"><div class="ct">${title} <small>· ${sub}</small></div>` +
+         `<div class="ring-legend" style="justify-content:flex-start;margin:0 0 10px">` +
+           `<span class="lg"><span class="sw out"></span>Outbound</span>` +
+           `<span class="lg"><span class="sw in"></span>Inbound</span></div>` +
+         `<div class="mbars">${bars}</div></div>`;
+}
+
+window.renderAeSelect = function () {
+  const wrap = document.getElementById("ae-select");
+  if (!wrap) return;
+  const aes = DATA.aes || [];
+  if (aeIdx >= aes.length) aeIdx = 0;
+  const opts = aes.map((a, i) => ({ val: i, label: a.name }));
+  buildDropdown(wrap, aes[aeIdx]?.name || "Select AE", opts, aeIdx,
+    i => { aeIdx = i; window.renderAeSelect(); window.renderAe(); });
+};
+
+window.renderAe = function () {
+  const a = (DATA.aes || [])[aeIdx];
+  const box = document.getElementById("ae-detail-box");
+  if (!box) return;
+  if (!a) { box.innerHTML = "<div class='ring-sub'>No AE data available.</div>"; return; }
+  const rs = DATA.rangeStart;
+
+  const dealsM = monthlyRollup(a.series?.deals,   rs).map(m => ({...m, value: Math.round(m.value)}));
+  const obDM   = monthlyRollup(a.series?.obDeals, rs).map(m => ({...m, value: Math.round(m.value)}));
+  const ibDM   = monthlyRollup(a.series?.ibDeals, rs).map(m => ({...m, value: Math.round(m.value)}));
+  const obAM   = monthlyRollup(a.series?.obArr,   rs);
+  const ibAM   = monthlyRollup(a.series?.ibArr,   rs);
+
+  // top cards are all-time totals — they sum the same monthly bars shown in the charts below
+  const dealsAll = dealsM.reduce((s, m) => s + m.value, 0);
+  const obArrAll = obAM.reduce((s, m) => s + m.value, 0);
+  const ibArrAll = ibAM.reduce((s, m) => s + m.value, 0);
+  const arrAll   = obArrAll + ibArrAll;
+  const avgDeal  = dealsAll ? arrAll / dealsAll : 0;
+  const stats = [
+    ["Deals Closed", fmt(Math.round(dealsAll)), "all time"],
+    ["New ARR", usdk(arrAll), "closed · all time"],
+    ["Avg Deal Size", usd(avgDeal), "per closed deal"],
+    ["Outbound ARR", usdk(obArrAll), "all time"],
+    ["Inbound ARR", usdk(ibArrAll), "all time"],
+  ];
+
+  box.innerHTML =
+    `<div class="bdr-head"><span class="who">${a.name}</span>` +
+      `<span class="stage-pill steady">AE</span></div>` +
+    `<div class="grid stats">` + stats.map(([k,v,t]) =>
+        `<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div><div class="t">${t}</div></div>`).join("") + `</div>` +
+    `<div class="bdr-charts">` +
+      monthChart("Deals Closed", "month over month", dealsM, v => String(Math.round(v))) +
+      monthChart2("Deals by Source", "outbound vs inbound", obDM, ibDM, v => String(Math.round(v))) +
+      monthChart2("ARR by Source", "outbound vs inbound", obAM, ibAM, v => usdk(v)) +
+    `</div>`;
+};
+</script>
+
+<!-- ================================================================
+     TEAM ARR GOAL  —  reconciled bottom-up from per-rep quotas
+     ================================================================ -->
+<script>
+// Office ARR goal — pinned to a fixed $650k target for the whole office,
+// the same for the BDR-sourced and AE-closed lenses.
+const AE_ARR_MO_TGT = 150000;                          // per-AE monthly ARR quota (rep cards)
+const OFFICE_ARR_GOAL = 650000;                        // fixed office target
+const officeArrGoal = (lens = "bdr") => OFFICE_ARR_GOAL;
+
+// Two lenses on the same month, deliberately NOT summed (BDRs source the
+// deals AEs close, so they overlap):
+//  • BDR-sourced — credited to the SF BDR who sourced the deal, even when an
+//    outside (non-SF) AE closes it. This is what the BDR team drives.
+//  • AE-closed — credited to the SF AE who closed the deal.
+function goalDataFrom(list) {
+  const midx = weeksInMonth(curMonth());
+  const rows = (list || []).map(r => {
+    const ob = seriesSum(r, "obArr", midx), ib = seriesSum(r, "ibArr", midx);
+    return { name: r.name, ob, ib, value: ob + ib };
+  }).filter(r => r.value > 0).sort((a, b) => b.value - a.value);
+  const outbound = rows.reduce((s, r) => s + r.ob, 0);
+  const inbound  = rows.reduce((s, r) => s + r.ib, 0);
+  return { rows, outbound, inbound, total: outbound + inbound };
+}
+const bdrGoalData = () => goalDataFrom(DATA.reps);
+const aeGoalData  = () => goalDataFrom(DATA.aes);
+// homepage progress bar tracks what the SF BDR team sources
+const teamGoalData = () => bdrGoalData();
+
+// which leaderboard the card shows ('bdr' sourced / 'ae' closed) + which tab ('month' / 'monthly')
+let goalView = "bdr";
+let goalTab = "month";
+window.setGoalView = function (v) { goalView = v; window.renderGoal(); if (goalTab === "monthly") window.renderGoalMonthly(); };
+window.setGoalTab = function (t) {
+  goalTab = t;
+  document.querySelectorAll("#goal-viewnav .tab.goalview").forEach(b => b.classList.toggle("active", b.dataset.goalview === t));
+  const dm = document.getElementById("team-goal-detail"), mm = document.getElementById("team-goal-monthly");
+  if (dm) dm.style.display = t === "month" ? "" : "none";
+  if (mm) mm.style.display = t === "monthly" ? "" : "none";
+  if (t === "monthly") window.renderGoalMonthly();
+};
+
+// team ARR summed across reps (BDR-sourced) or aes (AE-closed), rolled up by month from May
+function teamMonthlySeries(list) {
+  const rs = DATA.rangeStart;
+  const len = Math.max(0, ...(list || []).map(r => r.series?.obArr?.length || 0));
+  const sumKey = key => {
+    const acc = new Array(len).fill(0);
+    (list || []).forEach(r => (r.series?.[key] || []).forEach((v, i) => acc[i] += v));
+    return acc;
+  };
+  const ob = monthlyRollup(sumKey("obArr"), rs), ib = monthlyRollup(sumKey("ibArr"), rs);
+  return ob.map((m, i) => ({ label: m.label, ob: m.value, ib: ib[i]?.value || 0, value: m.value + (ib[i]?.value || 0) }));
+}
+
+window.renderGoalMonthly = function () {
+  const box = document.getElementById("team-goal-monthly");
+  if (!box) return;
+  const list = goalView === "ae" ? DATA.aes : DATA.reps;
+  const rows = teamMonthlySeries(list);
+  const labels = rows.map(r => r.label);
+  const lens = goalView === "ae" ? "AE closed" : "BDR sourced";
+  const goal = officeArrGoal(goalView);
+  const start = labels[0] || "May";
+  const toggle =
+    `<div class="toggle">` +
+      `<button class="${goalView === "bdr" ? "active" : ""}" onclick="setGoalView('bdr')">BDR sourced</button>` +
+      `<button class="${goalView === "ae" ? "active" : ""}" onclick="setGoalView('ae')">AE closed</button>` +
+    `</div>`;
+  const chart = monthChart2("Monthly ARR toward " + usdk(goal),
+    `${lens} · month over month · from ${start}`,
+    rows.map(r => ({ label: r.label, value: r.ob })),
+    rows.map(r => ({ label: r.label, value: r.ib })),
+    v => usdk(v));
+  const max = Math.max(1, ...rows.map(r => r.value));
+  const board = rows.map((r, i) =>
+    `<div class="lb-row">` +
+      `<div class="rank">${i + 1}</div>` +
+      `<div class="name">${r.label}</div>` +
+      `<div class="barwrap split">` +
+        `<div class="bar out" style="width:${r.ob / max * 100}%"></div>` +
+        `<div class="bar in"  style="width:${r.ib / max * 100}%"></div>` +
+      `</div>` +
+      `<div class="num">${usdk(r.value)} · ${Math.round(r.value / goal * 100)}%</div>` +
+    `</div>`).join("") || `<div class="ring-sub">No ARR yet.</div>`;
+  box.innerHTML =
+    `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">${toggle}</div>` +
+    chart +
+    `<div class="card board" style="margin-top:var(--gap)">` +
+      `<div class="bhead"><div class="title">By Month</div><div class="total">${lens}</div></div>` +
+      `<div class="ring-sub" style="margin:-2px 0 12px">Total ARR each month and its share of the ${usdk(goal)} target</div>` +
+      `<div class="contrib">${board}</div>` +
+    `</div>`;
+};
+
+window.renderGoal = function () {
+  const box = document.getElementById("team-goal-detail");
+  if (!box) return;
+  const data = goalView === "ae" ? aeGoalData() : bdrGoalData();
+  const { rows, outbound, inbound, total } = data;
+  const goal = officeArrGoal(goalView);
+  const ratio = Math.min(1, total / goal);
+  const remaining = Math.max(0, goal - total);
+  const share = v => total ? Math.round(v / total * 100) : 0;
+  const closedLabel = goalView === "ae" ? "closed" : "sourced";
+
+  // per-rep contribution toward the goal
+  const max = Math.max(1, ...rows.map(r => r.value));
+  const contrib = rows.map((r, i) =>
+    `<div class="lb-row">` +
+      `<div class="rank">${i < 3 ? `<span class="medal">${medal(i)}</span>` : i + 1}</div>` +
+      `<div class="name">${r.name}</div>` +
+      `<div class="barwrap split">` +
+        `<div class="bar out" style="width:${r.ob / max * 100}%"></div>` +
+        `<div class="bar in"  style="width:${r.ib / max * 100}%"></div>` +
+      `</div>` +
+      `<div class="num">${usdk(r.value)}</div>` +
+    `</div>`).join("") || `<div class="ring-sub">No ARR yet this month.</div>`;
+
+  const toggle =
+    `<div class="toggle">` +
+      `<button class="${goalView === "bdr" ? "active" : ""}" onclick="setGoalView('bdr')">BDR sourced</button>` +
+      `<button class="${goalView === "ae" ? "active" : ""}" onclick="setGoalView('ae')">AE closed</button>` +
+    `</div>`;
+
+  box.innerHTML =
+    `<div style="display:grid;gap:var(--gap);align-content:start">` +
+      `<div class="grid stats">` +
+        `<div class="card stat"><div class="edge good"></div><div class="k">${goalView === "ae" ? "Closed" : "Sourced"}</div><div class="v">${usdk(total)}</div><div class="t">${closedLabel} ARR · this month</div></div>` +
+        `<div class="card stat"><div class="edge" style="background:var(--accent)"></div><div class="k">Outbound</div><div class="v">${usdk(outbound)}</div><div class="t">${share(outbound)}% of ${closedLabel}</div></div>` +
+        `<div class="card stat"><div class="edge" style="background:#4d9bff"></div><div class="k">Inbound</div><div class="v">${usdk(inbound)}</div><div class="t">${share(inbound)}% of ${closedLabel}</div></div>` +
+        `<div class="card stat"><div class="edge"><div class="fill" style="height:${Math.max(4, Math.min(100, ratio * 100))}%;background:linear-gradient(to top, ${ratioColor(ratio * 0.5)}, ${ratioColor(ratio)})"></div></div><div class="k">Remaining</div><div class="v">${usdk(remaining)}</div><div class="t">${Math.round((1 - ratio) * 100)}% left</div></div>` +
+      `</div>` +
+      `<div class="card board">` +
+        `<div class="bhead"><div class="title">${goalView === "ae" ? "AE Leaderboard" : "BDR Leaderboard"}</div>${toggle}</div>` +
+        `<div class="ring-sub" style="margin:-2px 0 14px">${goalView === "ae" ? "ARR your SF AEs closed this month." : "ARR your SF BDRs sourced this month — counts even when an outside AE closes it."}</div>` +
+        `<div class="contrib">${contrib}</div>` +
+      `</div>` +
+    `</div>`;
+};
+</script>
+
+</body>
+</html>

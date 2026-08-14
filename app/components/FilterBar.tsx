@@ -40,11 +40,13 @@ export default function FilterBar({
   filters,
   setFilters,
   bdrs,
+  aes,
   months,
 }: {
   filters: Filters;
   setFilters: (f: Filters) => void;
   bdrs: string[];
+  aes: string[];
   months: string[];
 }) {
   const monthOptions = [
@@ -54,6 +56,10 @@ export default function FilterBar({
   const bdrOptions = [
     { value: "all", label: "All BDRs" },
     ...bdrs.map((b) => ({ value: b, label: b })),
+  ];
+  const aeOptions = [
+    { value: "all", label: "All AEs" },
+    ...aes.map((a) => ({ value: a, label: a })),
   ];
 
   const isFiltered =
@@ -70,8 +76,14 @@ export default function FilterBar({
       <Select
         label="BDR"
         value={filters.bdr}
-        onChange={(v) => setFilters({ ...filters, bdr: v })}
+        onChange={(v) => setFilters({ ...filters, bdr: v, ae: "all" })}
         options={bdrOptions}
+      />
+      <Select
+        label="AE"
+        value={filters.ae}
+        onChange={(v) => setFilters({ ...filters, ae: v, bdr: "all" })}
+        options={aeOptions}
       />
       {isFiltered && (
         <button

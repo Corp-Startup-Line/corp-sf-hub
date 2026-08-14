@@ -11,31 +11,70 @@
 
 import { unstable_cache } from "next/cache";
 import type { Prospect, Stage } from "../../lib/data";
-import {
-  emailDomain,
-  getCorgiIndex,
-  matchCompany,
-  matchCompanyLoose,
-  normalizeCompany,
-  normalizeEmail,
-  type CorgiCompany,
-  type CorgiIndex,
-} from "./corgi";
 import { enrichEngagements, type Engagement } from "./engagements";
 import { TEAM_BDRS, TEAM_AES } from "./team";
+
+// Strip the noise so "Acme, Inc." and "Acme Inc" match: lower-case, drop
+// punctuation and common company suffixes, then collapse the spaces. Used to key
+// companies for de-duping, cross-BDR ownership, and the hidden-company list.
+function normalizeCompany(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(
+      /\b(llc|inc|incorporated|ltd|limited|corp|corporation|co|company|llp|lp|plc|gmbh|group|holdings)\b/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// BDR roster lookup that IGNORES capitalization. A HubSpot profile whose name is
+// stored in a different case (e.g. "ethan wilensky") must still match our roster
+// entry ("Ethan Wilensky"); an exact, case-sensitive match silently dropped every
+// one of that person's deals. This maps a HubSpot display name back to the
+// roster's canonical spelling (or undefined if they're not on the team), so the
+// guard passes AND the dashboard always shows the tidy roster capitalization.
+const BDR_BY_LOWER = new Map(
+  [...TEAM_BDRS].map((n) => [n.toLowerCase(), n] as const),
+);
+const canonicalBdr = (name: string): string | undefined =>
+  BDR_BY_LOWER.get(name.trim().toLowerCase());
+
+// AEs are rostered too (SF corp AEs only — see team.ts). A deal's HubSpot owner
+// is only shown as the AE if they're on that roster; any other owner (a non-corp
+// AE, or a BDR who happens to own the deal) falls back to "Unassigned". This
+// keeps the AE filter/section to just the three corp AEs on BOTH dashboards, and
+// lets a non-corp BDR's self-owned wins fall into their BDR total (the BDR money
+// rule excludes deals you also own as AE; with the AE blanked that never fires).
+const AE_BY_LOWER = new Map(
+  [...TEAM_AES].map((n) => [n.toLowerCase(), n] as const),
+);
+const canonicalAe = (name: string): string | undefined =>
+  AE_BY_LOWER.get(name.trim().toLowerCase());
+
+// Companies to hide from the dashboard entirely (temporary). A deal whose
+// company name matches one of these is dropped at the source, so it disappears
+// everywhere at once — the deals table, KPIs, funnel, ARR totals, and the Metrics
+// feed / landing ring (they all read these same rows). Remove a name here to
+// bring its deals back.
+const EXCLUDED_COMPANIES = new Set<string>([
+  normalizeCompany("Hyperbolic"),
+]);
 
 // Always run fresh on each request (read the live key + live deals), never
 // cached at build time.
 export const dynamic = "force-dynamic";
-// Corgi's API can only be paged (no company filter) and throttles hard, so a
-// cold pull of all quotes takes ~30s. Allow up to 60s so Vercel doesn't cut it
-// off; after the first pull it's cached in memory and responses are instant.
+// A cold pull (all team deals + their engagements) can take a while against
+// HubSpot's rate limits. Allow up to 60s so Vercel doesn't cut it off; after
+// the first pull the result is cached and responses are instant.
 export const maxDuration = 60;
 
 const HUBSPOT_BASE = "https://api.hubapi.com";
 
-// How long (seconds) to reuse a fetched result before going back to HubSpot +
-// Corgi. Keeps the dashboard fast on repeat loads without showing badly stale
+// How long (seconds) to reuse a fetched result before going back to HubSpot.
+// Keeps the dashboard fast on repeat loads without showing badly stale
 // numbers. Used by unstable_cache below (Next's persistent Data Cache).
 const REVALIDATE_SECONDS = 5 * 60; // 5 minutes
 
@@ -43,13 +82,17 @@ const REVALIDATE_SECONDS = 5 * 60; // 5 minutes
 // remove a teammate there; both this route and the dashboard read from it.
 
 // HubSpot's internal stage IDs → the dashboard's stage names.
-// (Mapping confirmed with Carwyn: Contract Sent folds into Quoted; HubSpot's
-// "Closed Lost" shows as Ghosting; HubSpot's "Disqualified" shows as Closed Lost.)
+// (Mapping confirmed with Carwyn: HubSpot's "Closed Lost" shows as Ghosting;
+// HubSpot's "Disqualified" shows as Closed Lost.)
+// NOTE: The old "Quoted" stage came from the retired Corgi/Django system. With
+// Django access gone we no longer track it, so HubSpot's two former Quoted
+// stages now fold into "Meeting Booked" — each deal keeps its quote amount, only
+// the stage label changes.
 const STAGE_BY_HUBSPOT: Record<string, Stage> = {
   contractsent: "Meeting Booked", // labelled "Booked" in HubSpot
   qualifiedtobuy: "Qualified", // labelled "Discovery"
-  "2808562411": "Quoted",
-  "3653087972": "Quoted", // "Contract Sent"
+  "2808562411": "Meeting Booked", // was "Quoted"
+  "3653087972": "Meeting Booked", // was "Quoted" ("Contract Sent")
   closedwon: "Closed Won",
   closedlost: "Ghosting",
   "3448964848": "Closed Lost", // "Disqualified"
@@ -66,6 +109,8 @@ const DEAL_PROPERTIES = [
   "hs_last_sales_activity_timestamp",
   "closedate",
   "createdate",
+  "hs_v2_date_entered_closedwon",
+  "source",
 ];
 
 type HubSpotDeal = {
@@ -181,7 +226,6 @@ function latestIso(
 function mapDeal(
   d: HubSpotDeal,
   id2name: Map<string, string>,
-  byCompany: Map<string, CorgiCompany> | null,
 ): Prospect | null {
   const p = d.properties;
   const stage = STAGE_BY_HUBSPOT[p.dealstage ?? ""];
@@ -189,47 +233,78 @@ function mapDeal(
 
   // The search already limited results to our team's BDRs, so just resolve
   // the display names. Keep the on-team guard as a belt-and-braces check.
-  const bdr = p.bdr ? id2name.get(p.bdr) ?? "Unassigned" : "Unassigned";
-  if (!TEAM_BDRS.has(bdr)) return null;
+  // Match the roster case-insensitively and adopt its canonical spelling, so a
+  // lowercased HubSpot profile ("ethan wilensky") still lands on the right card.
+  const bdr = canonicalBdr(p.bdr ? id2name.get(p.bdr) ?? "" : "");
+  if (!bdr) return null;
+  // `owner` = the deal's real HubSpot owner, whoever it is — shown as-is in the
+  // deals table so the deal history always names the actual person.
+  // `ae` = the ATTRIBUTION AE, used for the AE filter, AE breakdown, and the money
+  // rules: only a rostered SF corp AE counts; any other owner (non-corp AE, or a
+  // BDR who owns their own deal) → "Unassigned", keeping the AE filter/section and
+  // the credit maths limited to the three corp AEs on both dashboards.
   const ownerName = p.hubspot_owner_id
-    ? id2name.get(p.hubspot_owner_id) ?? "Unassigned"
-    : "Unassigned";
-  // Only surface corp AEs; anyone else's name becomes "Unassigned" so they
-  // don't appear as an AE card/filter option (the deal itself is kept).
-  const ae = TEAM_AES.has(ownerName) ? ownerName : "Unassigned";
-  // Which month a deal belongs to. A HubSpot data migration on ~2026-06-18
-  // OVERWROTE the closedate of every then-existing Closed Won deal, stamping the
-  // whole back-catalogue into June 2026 (this collapsed the year's wins into one
-  // giant fake June bar). Deals closed AFTER the migration carry a REAL closedate
-  // (e.g. genuine July wins). So: trust closedate normally, but for anything
-  // stamped in the June-2026 migration month fall back to createdate (when the
-  // deal was actually worked). Open deals have no closedate → createdate too.
+    ? id2name.get(p.hubspot_owner_id) ?? ""
+    : "";
+  const owner = ownerName.trim() || "Unassigned";
+  const ae = canonicalAe(ownerName) ?? "Unassigned";
+  // Which date a deal is dated by. Drives BOTH `month` and `closeDate`, so the
+  // Corp SF Pipeline and Corp SF Metrics dashboards bucket every deal identically
+  // (they read these same rows) and can't disagree.
+  //
+  // A HubSpot data migration on 2026-06-18 bulk-stamped every then-existing
+  // Closed Won deal with a fake June-2026 `closedate` — collapsing the whole
+  // back-catalogue into one giant fake June bar. It ALSO stamped those same
+  // deals' "date entered Closed Won" at exactly 2026-06-18. So for a WON deal we
+  // date it by the real "date entered Closed Won" (which survives the closedate
+  // overwrite for genuine wins), EXCEPT the migration batch (entered exactly on
+  // 2026-06-18) which we date by createdate — when the deal was actually worked —
+  // to keep the migrated back-catalogue out of a fake June spike. Every other
+  // deal keeps the old rule: trust closedate unless it's in the migration month,
+  // else fall back to createdate. Open deals have no closedate → createdate too.
+  const MIGRATION_DAY = "2026-06-18";
   const MIGRATION_MONTH = "2026-06";
+  const enteredWon = (p.hs_v2_date_entered_closedwon ?? "").slice(0, 10);
   const closeMonth = (p.closedate ?? "").slice(0, 7);
   const when =
-    p.closedate && closeMonth !== MIGRATION_MONTH
-      ? p.closedate
-      : p.createdate || p.closedate || "";
+    stage === "Closed Won"
+      ? enteredWon && enteredWon !== MIGRATION_DAY
+        ? enteredWon
+        : p.createdate || p.closedate || ""
+      : p.closedate && closeMonth !== MIGRATION_MONTH
+        ? p.closedate
+        : p.createdate || p.closedate || "";
 
   const company = (p.dealname ?? "Untitled")
     .replace(/\s*-\s*New Deal\s*$/i, "")
     .trim();
-  // Look up THIS company's Corgi/Django record (all its quotes). When the Corgi
-  // index is unavailable (null), leave the quote fields undefined so the
-  // dashboard falls back to the HubSpot deal amount instead of showing zeroes.
-  const c = byCompany ? matchCompany(byCompany, company) : null;
-  const base: Prospect = {
+  // Hidden company (see EXCLUDED_COMPANIES) → drop the deal entirely. Checks the
+  // base name too, so "Hyperbolic - Upsell" is caught alongside "Hyperbolic".
+  if (
+    EXCLUDED_COMPANIES.has(normalizeCompany(company)) ||
+    EXCLUDED_COMPANIES.has(baseCompanyKey(company))
+  ) {
+    return null;
+  }
+  // Money comes straight from the HubSpot deal amount.
+  return {
     id: Number(d.id),
     company,
     stage,
     bdr,
     ae,
+    owner,
     contact: "",
     meetingDate: toDate(p.createdate),
     quote: Math.round(Number(p.amount) || 0),
     notes: "",
     month: when.slice(0, 7), // "YYYY-MM"
-    confirmed: stage === "Closed Won", // fallback until Corgi says otherwise
+    // The full resolved date (same migration-corrected value as `month`) and the
+    // deal source, so the Corp SF Metrics page can bucket this won deal into the
+    // right week and split it inbound/outbound off these very rows.
+    closeDate: when ? when.slice(0, 10) : null,
+    source: p.source ?? null,
+    confirmed: stage === "Closed Won",
     // Every deal must carry a real HubSpot date. Prefer the newest of the "Last
     // Contacted" stamp (calls/emails/meetings) and "Last Activity" stamp (which
     // also covers logged notes) — this is HubSpot's broader activity view; then
@@ -240,313 +315,26 @@ function mapDeal(
       toDate(p.hs_last_sales_activity_timestamp) ??
       toDate(p.createdate),
   };
-  if (!byCompany) return base; // Corgi unavailable → stage-based fallback only
-
-  // The actual premium is filled in AFTER de-duping (distributeCorgiRevenue),
-  // because a company's purchased policies are spread across its surviving deals
-  // there — doing it per-deal here would copy one company's total onto each of
-  // its deals and double-count. corgiRevenueResolved marks deals whose value
-  // Corgi owns (so a $0 there means "no policy", not "fall back to HubSpot").
-  return {
-    ...base,
-    confirmed: c?.hasPurchased ?? false, // refined per-deal after distribution
-    hasCorgiQuote: c?.hasQuote ?? false, // Corgi/Django has a quote for it
-    corgiStatus: c?.status ?? null,
-    corgiPremium: 0,
-    corgiQuotedPremium: c?.quotedPremium ?? 0, // amount quoted (not yet sold)
-    corgiRevenueResolved: false,
-  };
 }
 
-// Manual ownership calls for genuine data ties. When one Corgi policy could
-// belong to either of two IDENTICAL Closed Won deals (same company, same
-// amount) owned by different BDRs, nothing in HubSpot or Corgi can tell them
-// apart, so the nearest-amount match is a coin-flip. These overrides record who
-// the policy actually belongs to. Keyed by normalised company name → the BDR's
-// full HubSpot name. Mainstay Digital: confirmed by Carwyn as his deal.
+// Manual ownership calls for genuine data ties. When the same company is worked
+// by two different BDRs and the rules of engagement can't separate them, these
+// overrides record who the account actually belongs to (used by pickOwner in the
+// cross-BDR collapse). Keyed by normalised company name → the BDR's full HubSpot
+// name. Mainstay Digital: confirmed by Carwyn as his deal.
 const OWNERSHIP_OVERRIDES: Record<string, string> = {
   [normalizeCompany("Mainstay Digital")]: "Carwyn Chiramel",
 };
 
-// Human-confirmed identity aliases: a HubSpot deal named on the LEFT is the same
-// customer as the Django legal entity on the RIGHT. HubSpot deals use nicknames
-// ("ChatLabs") while Django files the full legal name ("ChatLabs Technology Inc"),
-// and there's no shared ID between the two systems — so when the deal has no
-// contact email to bridge them (the reliable link), an exact/domain match is
-// impossible and the sale would show $0. Each pair below was verified by hand
-// against Django's /policies feed (real bought policy + premium). This is the ONLY
-// place fuzzy names are trusted, and only because a human signed off on each one —
-// so it can never silently merge two different companies the way prefix-guessing
-// did. To link a new one: add its contact email in HubSpot (auto-links by domain)
-// or add a confirmed pair here. Left = the HubSpot deal name, right = the exact
-// Django insured legal name.
-const COMPANY_ALIAS_PAIRS: [string, string][] = [
-  ["ChatLabs", "ChatLabs Technology Inc"],
-  ["Nimblemind.ai", "Nimblemind INC."],
-  ["Lillia", "Lillia Healthcare Technologies Inc"],
-  ["Rette (Defect AI)", "Rette Corp"],
-  ["Eckuity Capital - Upsell", "Eckuity LLC"],
-  ["PicMii Crowdfunding", "PicMii Crowdfunding, LLC (d/b/a Highlander Crowdfunding)"],
-  // These two also share the customer's email DOMAIN with their Django policy
-  // (korra.ai, soap.health), so the match is doubly confirmed.
-  ["Korra", "Korra AI"],
-  ["SOAP Health", "SOAP, Inc."],
-];
-// normalised HubSpot deal name → the normalised Django legal-name key it matches.
-const COMPANY_ALIASES = new Map<string, string>(
-  COMPANY_ALIAS_PAIRS.map(([deal, legal]) => [
-    normalizeCompany(deal),
-    normalizeCompany(legal),
-  ]),
-);
-
 // The BASE company for a HubSpot deal, with any trailing deal-type suffix
 // removed ("Trellus (YC W22) - D&O upsell" and "Trellus (YC W22) - D&O" both →
-// "trellus yc w22"; "Journey - Upsell" → "journey"). This lets a company's base
-// deal and its follow-on deals (upsell / D&O / reinstatement) each match the same
-// Django customer's policies even when only one of them carries a contact email.
-// Only strips a trailing " - <...>" segment; names without one are unchanged.
+// "trellus yc w22"; "Journey - Upsell" → "journey"). Lets the hidden-company
+// list catch a company's follow-on deals ("Hyperbolic - Upsell") alongside its
+// base deal. Only strips a trailing " - <...>" segment; names without one are
+// unchanged.
 function baseCompanyKey(company: string): string {
   const stripped = company.replace(/\s*[-–—]\s+.*$/, "").trim();
   return normalizeCompany(stripped) || normalizeCompany(company);
-}
-
-// ----------------------------------------------------------------------------
-// Credit each Closed Won deal with the real premium of the Django POLICY it sold,
-// using the /policies feed as the single source of truth (the /quotes feed marks
-// bought policies "purchased" but zeroes their premium, which used to make wins
-// fall back to the QUOTED figure or to another company matched by a shared email
-// — both overstated the number).
-//
-// Every policy is a distinct sale (policy_number) and is assigned to EXACTLY ONE
-// won deal — the candidate whose HubSpot amount is nearest, biggest policies
-// first — so no sale is ever counted twice, even when several deals share a
-// broker email. A deal is a candidate for a policy when any of its handles (its
-// company name, its family's base name, or the buyer's email) matches one of the
-// policy's handles. Each credited deal is also dated by its policy's real
-// purchase month (purchased_at), fixing wins mis-dated by HubSpot's June-2026
-// migration.
-//
-// A won deal whose COMPANY NAME matches a Django policy is "Corgi-owned": if it
-// wins no policy (its sale went to a sibling deal) it shows $0, never a fallback,
-// so a customer's total is never inflated. A won deal that only ever matched by a
-// shared email and won nothing is left alone (keeps its HubSpot amount), so a
-// broker inbox can't wrongly zero an unrelated deal.
-// ----------------------------------------------------------------------------
-function resolveCorgiRevenue(
-  rows: Prospect[],
-  index: CorgiIndex,
-  emailByDeal: Map<number, string>,
-): Prospect[] {
-  const won = rows.filter((r) => r.stage === "Closed Won");
-  if (won.length === 0) return rows;
-
-  // Handles each won deal can be matched to a policy on: its own name, its
-  // family's base name (strong "name" handles), and the buyer's email (a weaker
-  // handle — a broker inbox can span many companies).
-  const nameHandles = new Map<number, Set<string>>();
-  const allHandles = new Map<number, Set<string>>();
-  for (const d of won) {
-    const names = new Set<string>(
-      [normalizeCompany(d.company), baseCompanyKey(d.company)].filter(Boolean),
-    );
-    // A human-confirmed alias (e.g. "ChatLabs" → "ChatLabs Technology Inc") is a
-    // STRONG name handle: it lets this deal claim the policy filed under the
-    // Django legal name, exactly as if the names had matched directly.
-    const alias = COMPANY_ALIASES.get(normalizeCompany(d.company));
-    if (alias) names.add(alias);
-    const all = new Set<string>(names);
-    const email = normalizeEmail(emailByDeal.get(d.id) ?? "");
-    if (email) all.add(email); // exact-buyer handle (email domain is NOT used —
-    // shared broker addresses span unrelated companies; see buildPolicies).
-    nameHandles.set(d.id, names);
-    allHandles.set(d.id, all);
-  }
-
-  // Assign each distinct policy to exactly one won deal (biggest first, nearest
-  // HubSpot amount). Tally the premium and remember the policy's month per deal.
-  const premiumByDeal = new Map<number, number>();
-  const monthByDeal = new Map<number, string>();
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const policies = [...index.policies].sort((a, b) => b.premium - a.premium);
-  for (const pol of policies) {
-    const cands = won.filter((d) =>
-      pol.keys.some((k) => allHandles.get(d.id)!.has(k)),
-    );
-    if (cands.length === 0) continue;
-    // A NAME match beats an EMAIL match: a policy filed under a company's legal
-    // name belongs to THAT company's deal, never to a stranger who merely shares
-    // the buyer's (often brokered) email. Only when no deal matches the policy by
-    // name do we let the email-matched deals compete for it.
-    const nameCands = cands.filter((d) =>
-      pol.nameKeys.some((k) => nameHandles.get(d.id)!.has(k)),
-    );
-    const scoped = nameCands.length ? nameCands : cands;
-    // Honour a manual ownership call when a candidate for this exact policy is
-    // pinned to a BDR (a human-confirmed tie), else take the nearest amount.
-    const pinned = scoped.filter(
-      (d) => OWNERSHIP_OVERRIDES[normalizeCompany(d.company)] === d.bdr,
-    );
-    const pool = pinned.length ? pinned : scoped;
-    let best = pool[0];
-    let bestDiff = Infinity;
-    for (const d of pool) {
-      const diff = Math.abs((d.quote || 0) - pol.premium);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = d;
-      }
-    }
-    premiumByDeal.set(best.id, round2((premiumByDeal.get(best.id) ?? 0) + pol.premium));
-    if (!monthByDeal.has(best.id)) monthByDeal.set(best.id, pol.month);
-  }
-
-  // --------------------------------------------------------------------------
-  // Consolidate a customer's scattered policies onto ONE deal. A single
-  // customer often has several Closed-Won deals (a base deal plus "- Upsell" /
-  // "- Reinstatement" lines) and files several policies; the per-policy
-  // nearest-amount match above can pile every policy onto one sibling and leave
-  // the others at $0, so the main deal misleadingly shows "—". We group sibling
-  // deals that share a company name (or are bridged by a single policy carrying
-  // both a legal name and an organization name, e.g. "Altrina Corporation" /
-  // "Hammr"), keep every group inside a single BDR so no rep's total can shift,
-  // and move each group's whole premium onto its primary deal (the base line,
-  // the one with no deal-type suffix).
-  // --------------------------------------------------------------------------
-  const parent = new Map<number, number>();
-  const find = (x: number): number => {
-    let r = x;
-    while (parent.get(r) !== r) r = parent.get(r)!;
-    for (let c = x; c !== r; ) {
-      const n = parent.get(c)!;
-      parent.set(c, r);
-      c = n;
-    }
-    return r;
-  };
-  const union = (a: number, b: number) => parent.set(find(a), find(b));
-  for (const d of won) parent.set(d.id, d.id);
-  // Link deals that share a company-name handle (base + its "- Upsell" lines).
-  const byNameHandle = new Map<string, number[]>();
-  for (const d of won)
-    for (const k of nameHandles.get(d.id)!) {
-      const a = byNameHandle.get(k) ?? [];
-      a.push(d.id);
-      byNameHandle.set(k, a);
-    }
-  for (const ids of byNameHandle.values())
-    for (let i = 1; i < ids.length; i++) union(ids[0], ids[i]);
-  // Link deals bridged by one policy that carries several names.
-  for (const pol of index.policies) {
-    const linked = won.filter((d) =>
-      pol.nameKeys.some((k) => nameHandles.get(d.id)!.has(k)),
-    );
-    for (let i = 1; i < linked.length; i++) union(linked[0].id, linked[i].id);
-  }
-  // Bucket by (customer group, BDR) so a rep's total never moves to another.
-  const groups = new Map<string, Prospect[]>();
-  for (const d of won) {
-    const key = `${find(d.id)}|${d.bdr}`;
-    const a = groups.get(key) ?? [];
-    a.push(d);
-    groups.set(key, a);
-  }
-  for (const members of groups.values()) {
-    if (members.length < 2) continue;
-    const total = round2(
-      members.reduce((s, d) => s + (premiumByDeal.get(d.id) ?? 0), 0),
-    );
-    if (total === 0) continue;
-    // Primary = the base line (name has no "- suffix"), else the largest
-    // HubSpot amount, then the lowest id — always deterministic.
-    const primary = [...members].sort((a, b) => {
-      const asuf = normalizeCompany(a.company) === baseCompanyKey(a.company) ? 0 : 1;
-      const bsuf = normalizeCompany(b.company) === baseCompanyKey(b.company) ? 0 : 1;
-      if (asuf !== bsuf) return asuf - bsuf;
-      if ((b.quote || 0) !== (a.quote || 0)) return (b.quote || 0) - (a.quote || 0);
-      return a.id - b.id;
-    })[0];
-    const month = members
-      .map((d) => monthByDeal.get(d.id))
-      .filter(Boolean)
-      .sort()[0];
-    for (const d of members) {
-      premiumByDeal.set(d.id, d.id === primary.id ? total : 0);
-    }
-    if (month) monthByDeal.set(primary.id, month);
-  }
-
-  // Every Django policy NAME handle, so we can tell a "Corgi-owned" won deal
-  // (its company name is on a real policy) from one Corgi has never heard of.
-  const policyNameKeys = new Set<string>();
-  for (const pol of index.policies)
-    for (const k of pol.nameKeys) policyNameKeys.add(k);
-
-  for (const d of won) {
-    const wonPremium = premiumByDeal.get(d.id) ?? 0;
-    const nameMatched = [...nameHandles.get(d.id)!].some((k) =>
-      policyNameKeys.has(k),
-    );
-    if (wonPremium === 0 && !nameMatched) continue; // no Corgi purchase → HubSpot amount
-    d.corgiRevenueResolved = true; // Corgi owns the value (0 = no policy, not a fallback)
-    d.corgiPremium = wonPremium;
-    d.confirmed = wonPremium > 0;
-    const m = monthByDeal.get(d.id);
-    if (m) d.month = m;
-  }
-  return rows;
-}
-
-// ----------------------------------------------------------------------------
-// Attach Django quotes to OPEN deals whose company name didn't line up with
-// Django's spelling. A deal only gets a quote by NAME when HubSpot's company
-// name matches Django's — so brand-vs-legal-name drift ("Anomaly" vs "Anomaly
-// Innovations Inc.") and quotes filed under an unrelated legal name (Cosmos AI's
-// quote sits under "Bazzuka, Inc.") were missed. Django keys the same buyer
-// reliably by EMAIL, and by their company's email DOMAIN even when the exact
-// person differs, so for any open deal still missing a quote we look the buyer up
-// by email, then by domain, and copy across:
-//   • hasCorgiQuote — so the deal shows as "Quoted" (a real quote OR a purchase),
-//     including a "needs_review" quote whose premium Django hasn't computed yet
-//     (badge shows, value stays "—");
-//   • the quoted premium, only when we don't already have one and Django has a
-//     non-zero figure.
-// Purchased-policy REVENUE is resolved elsewhere (by policy name/email); this
-// only ever fills display fields on open deals, never overwrites a name match.
-// ----------------------------------------------------------------------------
-const OPEN_STAGES: Stage[] = ["Meeting Booked", "Qualified", "Quoted"];
-
-function enrichOpenQuotes(
-  rows: Prospect[],
-  index: CorgiIndex,
-  emailByDeal: Map<number, string>,
-): Prospect[] {
-  for (const r of rows) {
-    if (!OPEN_STAGES.includes(r.stage)) continue;
-    if (r.hasCorgiQuote && (r.corgiQuotedPremium ?? 0) > 0) continue; // fully resolved by name
-    // Try to find this open deal's Django record three ways, cheapest first:
-    //   1. a loose NAME match (exact, else a unique legal-name prefix) — needs no
-    //      email, so it catches brand-vs-legal drift ("Anomaly" → "Anomaly
-    //      Innovations Inc.", "Cloudbreak Energy" → "…Partners LLC");
-    //   2. the buyer's exact email;
-    //   3. the buyer's company email domain.
-    // This never touches revenue/ownership (matchCompany, exact-only, still owns
-    // that) — it only fills display flags on open deals.
-    const email = normalizeEmail(emailByDeal.get(r.id) ?? "");
-    const dom = email ? emailDomain(email) : "";
-    const c =
-      matchCompanyLoose(index.byCompany, r.company) ??
-      (email ? index.byEmail.get(email) : null) ??
-      (dom ? index.byDomain.get(dom) : null) ??
-      null;
-    if (!c) continue;
-    if (c.hasQuote) r.hasCorgiQuote = true; // real quote (or purchase) exists → Quoted
-    if (!r.corgiStatus && c.status) r.corgiStatus = c.status;
-    if ((r.corgiQuotedPremium ?? 0) === 0 && c.quotedPremium > 0) {
-      r.corgiQuotedPremium = c.quotedPremium;
-    }
-  }
-  return rows;
 }
 
 // ----------------------------------------------------------------------------
@@ -567,12 +355,11 @@ const STAGE_PRIORITY: Record<Stage, number> = {
 };
 
 // A ranked "realness" fingerprint for a deal, compared field-by-field:
-// confirmed money first, then having a real Corgi quote, then how far along the
-// stage is, then the deal amount. Bigger wins on the first field that differs.
+// confirmed money first, then how far along the stage is, then the deal amount.
+// Bigger wins on the first field that differs.
 function realness(p: Prospect): number[] {
   return [
     p.confirmed ? 1 : 0,
-    p.hasCorgiQuote ? 1 : 0,
     STAGE_PRIORITY[p.stage] ?? 0,
     p.quote || 0,
   ];
@@ -597,15 +384,11 @@ function byRealThenNewer(a: Prospect, b: Prospect): number {
 
 // Collapse duplicate company rows down to ONE deal per company per BDR. HubSpot
 // routinely holds the same opportunity several times for one rep — a real deal
-// plus an earlier-stage leftover or a ghosted shell — and because the company
-// carries a Corgi quote, every one of those rows looks "real", so they were all
-// surviving and showing as duplicates. A single BDR must never see the same
-// company twice, so within each company+BDR we keep only the most-real row
-// (confirmed money → Corgi quote → furthest stage → biggest amount) and drop
-// the rest. Revenue is safe: the company's full confirmed premium is credited
-// to the surviving deal afterwards (distributeCorgiRevenue). Two different BDRs
-// genuinely working the same company are kept apart (one row each), so neither
-// rep's board loses a deal.
+// plus an earlier-stage leftover or a ghosted shell. A single BDR must never see
+// the same company twice, so within each company+BDR we keep only the most-real
+// row (confirmed money → furthest stage → biggest amount) and drop the rest. Two
+// different BDRs genuinely working the same company are kept apart (one row
+// each), so neither rep's board loses a deal.
 function dedupeByCompany(rows: Prospect[]): Prospect[] {
   const groups = new Map<string, Prospect[]>();
   for (const r of rows) {
@@ -692,19 +475,20 @@ function collapseCrossBdr(rows: Prospect[]): Prospect[] {
 
 async function loadProspects(token: string): Promise<Prospect[]> {
   const { id2name, name2id } = await fetchOwners(token);
-  // Turn our team's names into HubSpot user IDs for the search filter.
+  // Turn our team's names into HubSpot user IDs for the search filter. Look up
+  // case-insensitively: a HubSpot profile stored in a different case (e.g.
+  // "ethan wilensky") would otherwise never resolve to an ID, so none of that
+  // rep's deals would even be requested.
+  const name2idLower = new Map<string, string>();
+  for (const [n, id] of name2id) name2idLower.set(n.toLowerCase(), id);
   const bdrIds = [...TEAM_BDRS]
-    .map((name) => name2id.get(name))
+    .map((name) => name2idLower.get(name.toLowerCase()))
     .filter((id): id is string => Boolean(id));
-  // Fetch the team's deals and the Corgi quote index side by side. If Corgi is
-  // unavailable, getCorgiIndex() returns an empty map and deals still load.
-  const [deals, corgi] = await Promise.all([
-    searchTeamDeals(token, bdrIds),
-    getCorgiIndex(),
-  ]);
-  const byCompany = corgi?.byCompany ?? null;
+  // Fetch the team's deals from HubSpot. The Corgi/Django feed has been retired
+  // (its API token was revoked), so every number now comes straight from HubSpot.
+  const deals = await searchTeamDeals(token, bdrIds);
   const mapped = deals
-    .map((d) => mapDeal(d, id2name, byCompany))
+    .map((d) => mapDeal(d, id2name))
     .filter((x): x is Prospect => x !== null);
   // Collapse each BDR's duplicate rows for a company down to one.
   const deduped = dedupeByCompany(mapped);
@@ -720,35 +504,21 @@ async function loadProspects(token: string): Promise<Prospect[]> {
     deduped.map((r) => String(r.id)),
     (ownerId) => Boolean(ownerId) && bdrOwnerIds.has(ownerId!),
   );
-  // Deal id → its contact's email, kept server-side only (never put on a Prospect,
-  // so customer emails never reach the browser). Feeds the Group A email fallback.
-  const emailByDeal = new Map<number, string>();
   for (const r of deduped) {
     const e: Engagement | undefined = engagements.get(String(r.id));
     r.lastInbound = e?.lastInbound ?? null;
     r.lastBdrOutbound = e?.lastBdrOutbound ?? null;
-    if (e?.contactEmail) emailByDeal.set(r.id, e.contactEmail);
   }
 
-  // Give every company a single owner (rules of engagement), THEN spread each
-  // Django customer's purchased Corgi policies across the surviving deals —
-  // grouping by canonical identity (company name, or email resolved back to the
-  // owning company) so a base deal and its upsell share one pool of policies and
-  // nothing is double-counted. When Corgi is unavailable, keep the HubSpot
-  // stage-based rows as-is.
+  // Give every company a single owner (rules of engagement). Money and stages
+  // now come straight from HubSpot (no Corgi enrichment), so the owned rows are
+  // the final rows.
   const owned = collapseCrossBdr(deduped);
-  const rows = corgi
-    ? enrichOpenQuotes(
-        resolveCorgiRevenue(owned, corgi, emailByDeal),
-        corgi,
-        emailByDeal,
-      )
-    : owned;
-  return rows;
+  return owned;
 }
 
-// The expensive pull (all HubSpot deals + the full Corgi/Django quote & policy
-// feed, ~30–60s cold) wrapped in Next's persistent Data Cache. Unlike a plain
+// The expensive pull (all HubSpot deals + their engagements, ~30–60s cold)
+// wrapped in Next's persistent Data Cache. Unlike a plain
 // module-level variable — which lives only inside ONE serverless instance and is
 // thrown away when that instance sleeps — unstable_cache stores the finished
 // result in a cache that is SHARED across every serverless instance (and even
@@ -759,13 +529,13 @@ async function loadProspects(token: string): Promise<Prospect[]> {
 // page is never blocked on the slow pull again. The HubSpot key is read inside
 // this function (server-only, never in the cache key or the browser). It also
 // coalesces concurrent identical calls, so a burst of visitors triggers one pull.
-const getCachedProspects = unstable_cache(
+export const getCachedProspects = unstable_cache(
   async (): Promise<Prospect[]> => {
     const token = process.env.HUBSPOT_TOKEN;
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v1"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v13"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 

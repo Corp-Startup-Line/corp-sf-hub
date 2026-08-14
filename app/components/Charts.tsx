@@ -6,7 +6,7 @@
 // them: a "won value by month" trend line and a rep leaderboard bar chart.
 // ============================================================================
 
-import type { MonthPoint, RepStat } from "../lib/data";
+import type { MonthPoint } from "../lib/data";
 import { Card, SectionLabel, money, moneyFull } from "../lib/ui";
 
 // "2026-03" -> "Mar". Just the short month name for compact axis labels.
@@ -62,41 +62,6 @@ export function WonTrend({ data }: { data: MonthPoint[] }) {
               </div>
             );
           })}
-        </div>
-      ) : (
-        <EmptyChart>No won deals in the current view.</EmptyChart>
-      )}
-    </Card>
-  );
-}
-
-// ---- Rep leaderboard: horizontal bars, biggest closer first ----------------
-export function RepLeaderboard({ stats, teamLabel }: { stats: RepStat[]; teamLabel: string }) {
-  const ranked = [...stats]
-    .filter((s) => s.wonValue > 0)
-    .sort((a, b) => b.wonValue - a.wonValue);
-  const max = Math.max(...ranked.map((s) => s.wonValue), 1);
-
-  return (
-    <Card>
-      <SectionLabel>{teamLabel} Leaderboard (Won $)</SectionLabel>
-      {ranked.length ? (
-        <div className="mt-3 space-y-3">
-          {ranked.map((r) => (
-            <div key={r.name} className="flex items-center gap-3">
-              <span className="w-24 shrink-0 truncate text-sm">{r.name}</span>
-              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-                <div
-                  className="h-full rounded-full bg-corgi-ginger transition-[width] duration-700 ease-out"
-                  style={{ width: `${(r.wonValue / max) * 100}%` }}
-                  title={`${r.name}: ${moneyFull(r.wonValue)} (${r.wonCount} won)`}
-                />
-              </div>
-              <span className="w-14 shrink-0 text-right text-sm tabular-nums text-neutral-600 dark:text-neutral-300">
-                {money(r.wonValue)}
-              </span>
-            </div>
-          ))}
         </div>
       ) : (
         <EmptyChart>No won deals in the current view.</EmptyChart>

@@ -9,10 +9,10 @@ import {
   computeFunnel,
   computeDealValues,
   computeQuota,
-  computeRepStats,
   computeKpis,
   computeMonthlyTrend,
   computeInsights,
+  monthsFromRows,
   atRiskDeals,
   DEFAULT_FILTERS,
   type Filters,
@@ -23,8 +23,8 @@ import { Skeleton } from "../lib/ui";
 import Header from "./Header";
 import FilterBar from "./FilterBar";
 import ManageBdrs from "./ManageBdrs";
-import { KpiStrip, InsightsPanel, Funnel, DealValue, QuotaCard, AtRiskDeals, RepCards } from "./Sections";
-import { WonTrend, RepLeaderboard } from "./Charts";
+import { KpiStrip, InsightsPanel, Funnel, DealValue, QuotaCard, AtRiskDeals } from "./Sections";
+import { WonTrend } from "./Charts";
 import ProspectsTable from "./ProspectsTable";
 
 export default function Dashboard() {
@@ -99,13 +99,9 @@ export default function Dashboard() {
 
   // The month dropdown is built from the months that actually have deals, so
   // new months (July, August, …) appear on their own — nothing is hardcoded.
-  const dataMonths = useMemo(
-    () =>
-      Array.from(
-        new Set(allRows.map((r) => r.month).filter(Boolean)),
-      ).sort() as string[],
-    [allRows],
-  );
+  // Uses the shared monthsFromRows helper (matches the chart + table filter, and
+  // drops future months like next month's booked meetings).
+  const dataMonths = useMemo(() => monthsFromRows(allRows), [allRows]);
 
   // Same idea for AEs (the deal owners), used by the AE breakdown tab: roster
   // first, plus any AE who has deals but isn't on the roster.
@@ -135,34 +131,26 @@ export default function Dashboard() {
     }
   }
 
+  // Pick a rep from the top filter bar → flip the breakdown to that team so the
+  // leaderboard, cards and focused view all follow (AE dropdown → AE view, BDR
+  // dropdown → BDR view). BDR and AE selection are mutually exclusive.
+  useEffect(() => {
+    if (filters.ae !== "all") setTeam("ae");
+    else if (filters.bdr !== "all") setTeam("bdr");
+  }, [filters.bdr, filters.ae]);
+
   // ---- Derived data (recalculated only when inputs change) ----
   const rows = useMemo(() => filterProspects(allRows, filters), [allRows, filters]);
   const funnel = useMemo(() => computeFunnel(rows), [rows]);
   const values = useMemo(() => computeDealValues(rows), [rows]);
-  const quota = useMemo(() => computeQuota(rows, filters), [rows, filters]);
-  const repStats = useMemo(
-    () =>
-      computeRepStats(
-        rows,
-        team,
-        team === "bdr" ? bdrs : dataAes,
-        filters.month !== "all",
-      ),
-    [rows, team, bdrs, dataAes, filters.month],
+  const quota = useMemo(
+    () => computeQuota(rows, filters, team, dataAes.length),
+    [rows, filters, team, dataAes.length],
   );
   const kpis = useMemo(() => computeKpis(rows), [rows]);
   const trend = useMemo(() => computeMonthlyTrend(rows), [rows]);
   const insights = useMemo(() => computeInsights(rows), [rows]);
   const atRisk = useMemo(() => atRiskDeals(rows), [rows]);
-
-  // Which rep (if any) is selected for the current team tab.
-  const selectedRep = team === "bdr" ? filters.bdr : filters.ae;
-
-  // Click a rep card → filter to them; click the same one again → clear.
-  function selectRep(name: string) {
-    const key = team === "bdr" ? "bdr" : "ae";
-    setFilters({ ...filters, [key]: filters[key] === name ? "all" : name });
-  }
 
   // Click a funnel card → filter deals by that stage; same one again → clear.
   function selectStage(f: Stage | "all") {
@@ -183,8 +171,11 @@ export default function Dashboard() {
     stageFilter !== "all" ||
     wonOnly;
 
-  // One BDR in focus → hide the cross-rep comparison sections.
-  const singleBdr = filters.bdr !== "all";
+  // One rep in focus (the BDR filter on the BDR tab, the AE filter on the AE
+  // tab) → hide the cross-rep comparison sections and switch to that rep's
+  // focused view.
+  const singleRep = (team === "bdr" ? filters.bdr : filters.ae) !== "all";
+  const teamLabel = team === "bdr" ? "BDR" : "AE";
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
@@ -192,7 +183,7 @@ export default function Dashboard() {
       <div className="mb-3 flex justify-end">
         <ManageBdrs bdrs={bdrs} onChange={updateBdrs} />
       </div>
-      <FilterBar filters={filters} setFilters={setFilters} bdrs={bdrs} months={dataMonths} />
+      <FilterBar filters={filters} setFilters={setFilters} bdrs={bdrs} aes={dataAes} months={dataMonths} />
 
       {loading ? (
         <LoadingState />
@@ -208,45 +199,14 @@ export default function Dashboard() {
             onToggleSort={() => setSortByWon((v) => !v)}
             onToggleWonOnly={() => setWonOnly((v) => !v)}
           />
-          <QuotaCard quota={quota} perBdr={filters.bdr !== "all"} />
+          <QuotaCard quota={quota} perRep={singleRep} teamLabel={teamLabel} />
 
-          {/* The leaderboard and per-rep breakdown are for comparing reps to
-              each other, so they only make sense when viewing the whole team.
-              Once a single BDR is in focus, hide them, surface that BDR's
-              at-risk deals, and let the Won-value trend take the full width. */}
-          {singleBdr ? (
-            <>
-              <AtRiskDeals deals={atRisk} />
-              <section className="mb-10 max-w-3xl">
-                <WonTrend data={trend} />
-              </section>
-            </>
-          ) : (
-            <>
-              {/* The leaderboard is a BDR-quota comparison, so it only shows on
-                  the BDR tab. On the AE tab it's hidden and the Won-value trend
-                  takes the full width. */}
-              {team === "bdr" ? (
-                <section className="mb-10 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-                  <WonTrend data={trend} />
-                  <RepLeaderboard stats={repStats} teamLabel="BDR" />
-                </section>
-              ) : (
-                <section className="mb-10 max-w-3xl">
-                  <WonTrend data={trend} />
-                </section>
-              )}
-
-              <RepCards
-                team={team}
-                setTeam={setTeam}
-                stats={repStats}
-                selected={selectedRep}
-                onSelect={selectRep}
-                showQuota={team === "bdr"}
-              />
-            </>
-          )}
+          {/* At-risk deals only make sense for a single rep in focus; the
+              Won-value trend always spans the full width. */}
+          {singleRep && <AtRiskDeals deals={atRisk} />}
+          <section className="mb-10">
+            <WonTrend data={trend} />
+          </section>
 
           {anyFilter && <ActiveFilters {...{ filters, stageFilter, wonOnly, clearAll }} />}
 

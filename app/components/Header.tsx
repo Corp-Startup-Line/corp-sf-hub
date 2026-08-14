@@ -67,7 +67,7 @@ export default function Header() {
       <div>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Corgi Pipeline
+            Corp SF Pipeline
           </h1>
           <LiveDot />
         </div>
@@ -75,7 +75,15 @@ export default function Header() {
           Last updated {updated ?? "—"} · live from HubSpot
         </p>
       </div>
-      <ThemeToggle />
+      <div className="flex items-center gap-2">
+        <a
+          href="/"
+          className="rounded-full border border-black/10 bg-white/60 px-3 py-2 text-sm backdrop-blur-xl transition hover:bg-white dark:border-white/15 dark:bg-white/10 dark:hover:bg-white/20"
+        >
+          ← Home
+        </a>
+        <ThemeToggle />
+      </div>
     </header>
   );
 }
