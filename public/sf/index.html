@@ -437,20 +437,23 @@
   @media (max-width: 560px) {
     body { padding: 20px 16px 48px; }
 
-    /* header + hero: reclaim vertical space */
-    .topbar { margin-bottom: 16px; }
+    /* header + hero: give each block room to breathe */
+    .topbar { margin-bottom: 22px; }
     /* controls: full-width row under the title, evenly spread instead of
        floating right where they wrap awkwardly */
     .controls { flex-direction: row; align-items: center; flex-wrap: wrap;
-                width: 100%; justify-content: flex-start; gap: 8px; margin-top: 4px; }
+                width: 100%; justify-content: flex-start; gap: 10px; margin-top: 10px; }
     /* hero: stretch to full width instead of floating as a centered island */
-    .hero-wrap { display: block; margin: 16px 0 2px; }
-    .hero { padding: 16px 22px; }
+    .hero-wrap { display: block; margin: 24px 0 24px; }
+    .hero { padding: 18px 22px; }
     .hero .val { font-size: 38px; }
     .quote { margin: 22px auto; }
 
     /* location bar: let the two badges sit inline-left and wrap if needed */
     .tabs .spacer { display: none; }
+    /* extra separation between the badge row and the nav pills below */
+    .tabs { margin-bottom: 18px; }
+    .rolenav { margin-bottom: 30px; }
 
     /* nav pills: smaller so the row wraps tidily */
     .rolenav .tab.role { padding: 10px 18px; font-size: 14px; }
