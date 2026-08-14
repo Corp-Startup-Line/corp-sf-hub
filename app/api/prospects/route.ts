@@ -63,6 +63,23 @@ const EXCLUDED_COMPANIES = new Set<string>([
   normalizeCompany("Hyperbolic"),
 ]);
 
+// One-off manual deal override. A genuine, human-confirmed credit that HubSpot's
+// live record no longer reflects. Keyed by normalised company name → the roster
+// BDR who sourced the win, plus an optional forced stage. We pull these deals
+// separately (searchOverrideDeals) in case their HubSpot BDR is off-roster, and in
+// mapDeal we force the BDR (and stage, if given), leaving the HubSpot record
+// untouched. Zig.ai: confirmed by Carwyn as Garrett Peterson's sourced Closed Won
+// (its HubSpot BDR was changed and it currently shows as an open stage, so we pin
+// it back to Closed Won for Garrett with the deal's amount).
+const BDR_ATTRIBUTION_OVERRIDES: {
+  company: string;
+  bdr: string;
+  forceStage?: Stage;
+}[] = [{ company: "Zig.ai", bdr: "Garrett Peterson", forceStage: "Closed Won" }];
+const ATTRIBUTION_BY_COMPANY = new Map(
+  BDR_ATTRIBUTION_OVERRIDES.map((o) => [normalizeCompany(o.company), o] as const),
+);
+
 // Always run fresh on each request (read the live key + live deals), never
 // cached at build time.
 export const dynamic = "force-dynamic";
@@ -206,6 +223,38 @@ async function searchTeamDeals(
   return deals;
 }
 
+// Fetch the specific deals named by a manual override. Their HubSpot BDR may be
+// someone off our roster, so searchTeamDeals (bdr IN roster) wouldn't return them
+// — we pull them here by deal name and let mapDeal reassign the BDR (and stage).
+// Merging by id downstream means a deal that's ALSO in the roster feed is counted
+// once, so this is safe even when the deal's BDR is on the team.
+async function searchOverrideDeals(token: string): Promise<HubSpotDeal[]> {
+  const out: HubSpotDeal[] = [];
+  for (const { company } of BDR_ATTRIBUTION_OVERRIDES) {
+    const body = {
+      filterGroups: [
+        {
+          filters: [
+            {
+              propertyName: "dealname",
+              operator: "CONTAINS_TOKEN",
+              value: company,
+            },
+          ],
+        },
+      ],
+      properties: DEAL_PROPERTIES,
+      limit: 100,
+    };
+    const page = await hs("/crm/v3/objects/deals/search", token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    out.push(...(page.results ?? []));
+  }
+  return out;
+}
+
 // Turn "2026-06-18T17:32:04Z" into "2026-06-18" (or null).
 function toDate(iso: string | null | undefined): string | null {
   return iso ? iso.slice(0, 10) : null;
@@ -228,14 +277,30 @@ function mapDeal(
   id2name: Map<string, string>,
 ): Prospect | null {
   const p = d.properties;
-  const stage = STAGE_BY_HUBSPOT[p.dealstage ?? ""];
+
+  // The deal's display company. Computed up here so the manual-override check can
+  // match on it.
+  const company = (p.dealname ?? "Untitled")
+    .replace(/\s*-\s*New Deal\s*$/i, "")
+    .trim();
+
+  // A manual override (see BDR_ATTRIBUTION_OVERRIDES) for a human-confirmed credit
+  // HubSpot's live record no longer reflects. When present it pins the sourcing
+  // BDR and, if given, forces the stage — so a deal whose HubSpot BDR/stage was
+  // changed still shows as that BDR's win on the dashboard. HubSpot is untouched.
+  const override =
+    ATTRIBUTION_BY_COMPANY.get(normalizeCompany(company)) ??
+    ATTRIBUTION_BY_COMPANY.get(baseCompanyKey(company));
+
+  const stage = override?.forceStage ?? STAGE_BY_HUBSPOT[p.dealstage ?? ""];
   if (!stage) return null; // stage we don't track → skip
 
-  // The search already limited results to our team's BDRs, so just resolve
-  // the display names. Keep the on-team guard as a belt-and-braces check.
-  // Match the roster case-insensitively and adopt its canonical spelling, so a
-  // lowercased HubSpot profile ("ethan wilensky") still lands on the right card.
-  const bdr = canonicalBdr(p.bdr ? id2name.get(p.bdr) ?? "" : "");
+  // Resolve the BDR. The override wins first; otherwise match the roster
+  // case-insensitively and adopt its canonical spelling, so a lowercased HubSpot
+  // profile ("ethan wilensky") still lands on the right card. A deal with no
+  // rostered BDR (and no override) is dropped.
+  const bdr =
+    override?.bdr ?? canonicalBdr(p.bdr ? id2name.get(p.bdr) ?? "" : "");
   if (!bdr) return null;
   // `owner` = the deal's real HubSpot owner, whoever it is — shown as-is in the
   // deals table so the deal history always names the actual person.
@@ -275,9 +340,6 @@ function mapDeal(
         ? p.closedate
         : p.createdate || p.closedate || "";
 
-  const company = (p.dealname ?? "Untitled")
-    .replace(/\s*-\s*New Deal\s*$/i, "")
-    .trim();
   // Hidden company (see EXCLUDED_COMPANIES) → drop the deal entirely. Checks the
   // base name too, so "Hyperbolic - Upsell" is caught alongside "Hyperbolic".
   if (
@@ -487,7 +549,13 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   // Fetch the team's deals from HubSpot. The Corgi/Django feed has been retired
   // (its API token was revoked), so every number now comes straight from HubSpot.
   const deals = await searchTeamDeals(token, bdrIds);
-  const mapped = deals
+  // Also pull any manually-attributed deals (e.g. Zig.ai → Garrett) whose HubSpot
+  // BDR is off-roster, so the roster search above skips them. Merge and de-dupe by
+  // HubSpot deal id so a deal that somehow appears in both lists is counted once.
+  const overrideDeals = await searchOverrideDeals(token);
+  const byId = new Map<string, HubSpotDeal>();
+  for (const d of [...deals, ...overrideDeals]) byId.set(d.id, d);
+  const mapped = [...byId.values()]
     .map((d) => mapDeal(d, id2name))
     .filter((x): x is Prospect => x !== null);
   // Collapse each BDR's duplicate rows for a company down to one.
