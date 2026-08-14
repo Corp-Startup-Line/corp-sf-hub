@@ -19,6 +19,12 @@ html {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* base bg on html so no black shows past the body box on mobile devices */
+  background-color: #f4ebdd;
+  overflow-x: hidden;
+}
+html.dark {
+  background-color: #14100b;
 }
 
 /* Light mode: warm Corgi cream base with soft ginger + fawn glows. */
