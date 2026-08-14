@@ -71,7 +71,7 @@ export default function TeamArrRing() {
   const inLen = inF * C;
 
   return (
-    <div className="mx-auto mb-12 w-full max-w-sm rounded-3xl border border-white/50 bg-gradient-to-b from-white/70 to-white/35 p-8 text-center shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-14px_rgba(0,0,0,0.22)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.12] dark:from-white/[0.10] dark:to-white/[0.03] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.10),0_12px_34px_-14px_rgba(0,0,0,0.55)]">
+    <div className="mx-auto mb-8 w-full max-w-sm rounded-3xl border border-white/50 bg-gradient-to-b from-white/70 to-white/35 p-6 text-center shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-14px_rgba(0,0,0,0.22)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.12] dark:from-white/[0.10] dark:to-white/[0.03] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.10),0_12px_34px_-14px_rgba(0,0,0,0.55)]">
       <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-500 dark:text-neutral-400">
         Total Team ARR · This Month
       </div>
