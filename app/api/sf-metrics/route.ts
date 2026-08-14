@@ -503,10 +503,23 @@ async function getMetrics() {
   return rebuild();
 }
 
+// Edge/CDN caching for the computed payload. This serves the EXACT same numbers
+// build() produced — it only changes WHERE the finished JSON is served from, so
+// no figure can change. Because the per-instance memory cache above is lost on a
+// serverless cold start, without this every cold visitor re-paid the ~40s HubSpot
+// build. With it, Vercel's shared CDN answers instantly for `s-maxage` seconds and
+// then serves the cached copy while refreshing in the background (SWR), so a user
+// is never blocked on the slow pull. Windows mirror the in-app cache (5 min).
+const CDN_CACHE = "public, s-maxage=300, stale-while-revalidate=900";
+
 export async function GET() {
   try {
-    return Response.json(await getMetrics());
+    return Response.json(await getMetrics(), {
+      headers: { "Cache-Control": CDN_CACHE, "CDN-Cache-Control": CDN_CACHE },
+    });
   } catch (e) {
+    // Errors are returned WITHOUT cache headers, so a transient failure is never
+    // cached at the edge.
     return Response.json({ error: String(e) }, { status: 500 });
   }
 }

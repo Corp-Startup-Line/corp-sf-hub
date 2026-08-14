@@ -539,6 +539,14 @@ export const getCachedProspects = unstable_cache(
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 
+// Edge/CDN caching for the finished rows. These are the SAME de-duped, owned
+// rows getCachedProspects() already computes (and shares across instances via
+// Next's Data Cache) — the header only lets Vercel's CDN serve that identical
+// JSON from the edge, so no number changes. `s-maxage` mirrors REVALIDATE_SECONDS
+// (5 min); stale-while-revalidate serves the cached copy while refreshing in the
+// background, so a repeat visitor never waits on the slow HubSpot pull.
+const CDN_CACHE = "public, s-maxage=300, stale-while-revalidate=900";
+
 export async function GET() {
   if (!process.env.HUBSPOT_TOKEN) {
     return Response.json(
@@ -549,7 +557,9 @@ export async function GET() {
 
   try {
     const prospects = await getCachedProspects();
-    return Response.json(prospects);
+    return Response.json(prospects, {
+      headers: { "Cache-Control": CDN_CACHE, "CDN-Cache-Control": CDN_CACHE },
+    });
   } catch (err) {
     // The browser keeps its own last-good copy (localStorage) and falls back to
     // it when this route errors, so a transient upstream failure never blanks
