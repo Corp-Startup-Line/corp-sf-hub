@@ -433,9 +433,13 @@
 
     /* header + hero: reclaim vertical space */
     .topbar { margin-bottom: 16px; }
-    .controls { flex-direction: row; align-items: center; flex-wrap: wrap; }
-    .hero-wrap { margin: 16px 0 2px; }
-    .hero { padding: 14px 22px; }
+    /* controls: full-width row under the title, evenly spread instead of
+       floating right where they wrap awkwardly */
+    .controls { flex-direction: row; align-items: center; flex-wrap: wrap;
+                width: 100%; justify-content: flex-start; gap: 8px; margin-top: 4px; }
+    /* hero: stretch to full width instead of floating as a centered island */
+    .hero-wrap { display: block; margin: 16px 0 2px; }
+    .hero { padding: 16px 22px; }
     .hero .val { font-size: 38px; }
     .quote { margin: 22px auto; }
 
@@ -471,6 +475,21 @@
     /* goal ring: don't let the 220px SVG force the card wide */
     .ring-card { padding: 22px 16px; }
     .ring-card svg { width: 180px; height: 180px; }
+
+    /* month bar charts: keep every month on-screen (incl. current month).
+       min-width:0 lets the flex/grid children shrink so the charts fit the
+       viewport instead of overflowing off the right edge. */
+    .mchart { min-width: 0; padding: 18px 16px 14px; }
+    .mbars { min-width: 0; gap: 8px; }
+    .mbar { flex: 1 1 0; min-width: 40px; }
+    .mbar .mv { font-size: 12px; }
+    .mbar .ml { font-size: 10px; }
+    /* stack outbound/inbound value labels vertically so narrow bars fit */
+    .mv2 { flex-direction: column; gap: 1px; align-items: center; }
+    .num2 { flex-direction: column; gap: 1px; align-items: flex-end; }
+    .num2-money .ovn, .num2-money .ivn { min-width: 0; font-size: 11px; }
+    .mbar2 .cols2 { gap: 4px; }
+    .mbar2 .cols2 .col { width: 14px; }
   }
 </style>
 </head>
