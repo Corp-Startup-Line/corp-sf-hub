@@ -1087,9 +1087,14 @@ function render() {
     return { ...r, dDials, dAppts, dIbDemos, dConnects: Math.round(dDials * 0.08) };
   });
 
-  /* --- HERO: calls per demo (team dials / appts for the selected day) --- */
-  const totDials = dailyReps.reduce((s,r)=>s+r.dDials,0);
-  const totAppts = dailyReps.reduce((s,r)=>s+r.dAppts,0);
+  /* --- HERO: calls per demo — use the latest weekday that actually has demos,
+     so a fresh morning (today logged no demos yet) shows the last real day
+     instead of a blank "—". Only affects the hero, not the day selector. --- */
+  let heroDi = di;
+  const apptsOn = i => reps.reduce((s,r)=>s+(r.daily?.demos?.[i] ?? 0),0);
+  while (heroDi > 0 && apptsOn(heroDi) === 0) heroDi--;
+  const totDials = reps.reduce((s,r)=>s+(r.daily?.dials?.[heroDi] ?? 0),0);
+  const totAppts = apptsOn(heroDi);
   $("#cpd").textContent = totAppts ? Math.round(totDials/totAppts) : "—";
   $("#daily-desc").textContent = DAY_LABELS[di] + " · per-rep pace vs ramp/steady targets";
 
