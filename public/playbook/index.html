@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corgi Cold Call Playbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #EFE8DA;
+    --surface: #F7F2E9;
+    --surface-2: #FBF8F1;
+    --ink: #26201A;
+    --ink-soft: #5A5147;
+    --ink-mute: #8B8175;
+    --clay: #B8703C;
+    --clay-deep: #9A5A2C;
+    --blue: #4A83E0;
+    --line: rgba(38,32,26,0.10);
+    --line-strong: rgba(38,32,26,0.16);
+    --green: #3E7C5A;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding: 3rem 1.5rem 5rem;
+  }
+
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  /* Two-pane shell */
+  .shell {
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    gap: 1.75rem;
+    align-items: start;
+  }
+  .sidebar { position: sticky; top: 1.5rem; }
+  .side-nav { display: grid; gap: 0.5rem; }
+  .side-btn {
+    display: flex; align-items: center; gap: 0.7rem;
+    width: 100%;
+    text-align: left;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    background: var(--surface);
+    border: 0.5px solid var(--line-strong);
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .side-btn .ico {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border-radius: 8px;
+    background: var(--surface-2);
+    border: 0.5px solid var(--line);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+  }
+  .side-btn .lbl { line-height: 1.15; }
+  .side-btn .lbl small {
+    display: block;
+    font-weight: 400;
+    font-size: 0.72rem;
+    color: var(--ink-mute);
+    margin-top: 0.1rem;
+  }
+  .side-btn:hover { border-color: var(--line-strong); background: var(--surface-2); }
+  .side-btn.active {
+    color: #fff;
+    background: var(--clay);
+    border-color: var(--clay);
+  }
+  .side-btn.active .ico {
+    background: rgba(255,255,255,0.18);
+    border-color: transparent;
+    color: #fff;
+  }
+  .side-btn.active .lbl small { color: rgba(255,255,255,0.75); }
+
+  .side-jump {
+    margin-top: 1.25rem;
+    padding-top: 1.1rem;
+    border-top: 0.5px solid var(--line-strong);
+  }
+  .side-jump-label {
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    font-weight: 600;
+    margin-bottom: 0.55rem;
+    padding-left: 0.2rem;
+  }
+  .side-jump a {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    text-decoration: none;
+    padding: 0.32rem 0.5rem;
+    border-radius: 7px;
+    transition: background 0.12s, color 0.12s;
+  }
+  .side-jump a:hover { background: var(--surface); color: var(--clay-deep); }
+
+  .panel { display: none; }
+  .panel.active { display: block; animation: fade 0.25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .panel > .eyebrow:first-child { margin-top: 0; }
+
+  @media (max-width: 720px) {
+    .shell { grid-template-columns: 1fr; gap: 1rem; }
+    .sidebar { position: static; }
+    .side-nav { grid-template-columns: 1fr 1fr; }
+    .side-jump { display: none; }
+    .side-btn { padding: 0.7rem 0.85rem; }
+  }
+
+  /* Header */
+  .masthead { text-align: center; margin-bottom: 2.25rem; }
+  .masthead h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: clamp(2.1rem, 6vw, 3rem);
+    letter-spacing: -0.02em;
+    line-height: 1.02;
+  }
+  .masthead .sub {
+    font-size: 0.8rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-top: 0.6rem;
+  }
+  .quote {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: clamp(1.05rem, 3.2vw, 1.4rem);
+    text-align: center;
+    max-width: 30ch;
+    margin: 1.75rem auto 0;
+    line-height: 1.3;
+  }
+  .quote .mark { color: var(--clay); }
+  .rule {
+    width: 46px; height: 2px;
+    background: var(--clay);
+    border: none; border-radius: 2px;
+    margin: 1.5rem auto 0;
+    opacity: 0.55;
+  }
+
+  /* Section eyebrow */
+  .eyebrow {
+    display: flex; align-items: center; gap: 0.6rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--clay-deep);
+    font-weight: 600;
+    margin: 2.75rem 0 1rem;
+  }
+  .eyebrow .n {
+    font-family: 'Fraunces', serif;
+    font-size: 0.95rem;
+    color: var(--ink);
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    font-weight: 600;
+  }
+
+  /* Card */
+  .card {
+    background: var(--surface);
+    border: 0.5px solid var(--line-strong);
+    border-radius: 14px;
+    padding: 1.4rem 1.5rem;
+    box-shadow: 0 1px 2px rgba(38,32,26,0.03);
+  }
+  .card + .card { margin-top: 0.85rem; }
+
+  .card-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    font-weight: 600;
+    margin-bottom: 0.7rem;
+  }
+
+  .script-line { font-size: 1.02rem; line-height: 1.6; }
+  .script-line + .script-line { margin-top: 0.7rem; }
+  .script-line .fill {
+    color: var(--clay-deep);
+    font-weight: 600;
+    border-bottom: 1.5px dotted var(--clay);
+    padding-bottom: 1px;
+  }
+  .script-line strong { font-weight: 600; }
+
+  .tag {
+    display: inline-block;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--clay-deep);
+    background: rgba(184,112,60,0.10);
+    border-radius: 5px;
+    padding: 0.15rem 0.5rem;
+    margin-bottom: 0.7rem;
+  }
+  .tag.blue { color: #35619e; background: rgba(74,131,224,0.12); }
+
+  /* Two openers side by side */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
+  @media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* Objections */
+  .obj {
+    background: var(--surface);
+    border: 0.5px solid var(--line-strong);
+    border-radius: 14px;
+    padding: 0; overflow: hidden;
+  }
+  .obj + .obj { margin-top: 0.7rem; }
+  .obj-head {
+    display: flex; align-items: center; gap: 0.7rem;
+    padding: 1rem 1.4rem;
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--ink);
+    background: var(--surface-2);
+    border-bottom: 0.5px solid var(--line);
+  }
+  .obj-head .badge {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--clay);
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    display: grid; place-items: center;
+    flex-shrink: 0;
+  }
+  .obj-body { padding: 1.1rem 1.4rem; }
+  .obj-body p { font-size: 0.96rem; line-height: 1.58; color: var(--ink-soft); }
+  .obj-body p + p { margin-top: 0.7rem; }
+  .obj-body .then {
+    display: block;
+    font-size: 0.7rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--clay-deep);
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    margin-top: 0.9rem;
+  }
+  .obj-body strong { color: var(--ink); font-weight: 600; }
+
+  /* Pillars quick ref */
+  .pillars { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+  @media (max-width: 620px) { .pillars { grid-template-columns: 1fr; } }
+  .pill {
+    background: var(--surface);
+    border: 0.5px solid var(--line-strong);
+    border-radius: 11px;
+    padding: 0.85rem 1rem;
+  }
+  .pill h4 {
+    font-family: 'Fraunces', serif;
+    font-size: 0.98rem;
+    font-weight: 600;
+    display: flex; align-items: baseline; gap: 0.45rem;
+  }
+  .pill h4 .abbr { color: var(--clay); }
+  .pill p { font-size: 0.85rem; color: var(--ink-soft); margin-top: 0.3rem; line-height: 1.5; }
+
+  /* Forcing functions */
+  .forces { margin-top: 1rem; display: grid; gap: 0.5rem; }
+  .force {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    align-items: baseline; gap: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--surface-2);
+    border: 0.5px solid var(--line);
+    border-radius: 9px;
+  }
+  .force-t {
+    font-weight: 600; font-size: 0.9rem; color: var(--ink);
+  }
+  .force-d { font-size: 0.86rem; color: var(--ink-soft); }
+  @media (max-width: 500px) {
+    .force { grid-template-columns: 1fr; gap: 0.15rem; }
+  }
+
+  /* Quick picks */
+  .picks { list-style: none; display: grid; gap: 0.5rem; }
+  .picks li {
+    display: flex; align-items: center; gap: 0.6rem;
+    font-size: 0.88rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--surface-2);
+    border: 0.5px solid var(--line);
+    border-radius: 9px;
+  }
+  .pk-when { color: var(--ink-soft); flex: 1; }
+  .pk-arrow { color: var(--clay); font-weight: 600; }
+  .pk-pol { color: var(--clay-deep); font-weight: 600; text-align: right; }
+  @media (max-width: 500px) {
+    .picks li { flex-wrap: wrap; }
+    .pk-when { flex: 1 1 100%; }
+    .pk-pol { text-align: left; }
+  }
+
+  /* Battle cards */
+  .bcard {
+    background: var(--surface);
+    border: 0.5px solid var(--line-strong);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(38,32,26,0.03);
+  }
+  .bcard + .bcard { margin-top: 0.85rem; }
+  .bcard-top {
+    display: flex; align-items: center; gap: 0.8rem;
+    padding: 0.95rem 1.4rem;
+    background: var(--surface-2);
+    border-bottom: 0.5px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .bcard-abbr {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #fff;
+    background: var(--clay);
+    padding: 0.28rem 0.6rem;
+    border-radius: 7px;
+    letter-spacing: -0.01em;
+    flex-shrink: 0;
+  }
+  .bcard-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--ink);
+    line-height: 1.15;
+    flex: 1;
+  }
+  .bcard-full {
+    display: block;
+    font-family: 'Inter', sans-serif;
+    font-weight: 400;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-top: 0.15rem;
+  }
+  .bcard-req {
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--clay-deep);
+    background: rgba(184,112,60,0.10);
+    padding: 0.25rem 0.55rem;
+    border-radius: 5px;
+    flex-shrink: 0;
+  }
+  .bcard-grid { padding: 0.35rem 1.4rem 0.6rem; }
+  .bc-row {
+    display: flex; gap: 1rem;
+    padding: 0.62rem 0;
+    border-bottom: 0.5px solid var(--line);
+  }
+  .bc-row:last-child { border-bottom: none; }
+  .bc-k {
+    font-size: 0.68rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--ink-mute);
+    min-width: 96px; flex-shrink: 0;
+    padding-top: 0.1rem;
+  }
+  .bc-v { font-size: 0.9rem; color: var(--ink-soft); line-height: 1.5; }
+  .bc-v strong { color: var(--ink); font-weight: 600; }
+  @media (max-width: 500px) {
+    .bc-row { flex-direction: column; gap: 0.15rem; }
+    .bc-k { min-width: 0; }
+  }
+  .bcard-line {
+    margin: 0 1.4rem 1.15rem;
+    padding: 0.75rem 1rem;
+    background: rgba(184,112,60,0.07);
+    border-left: 2.5px solid var(--clay);
+    border-radius: 0 8px 8px 0;
+    font-family: 'Fraunces', serif;
+    font-size: 0.96rem;
+    font-style: italic;
+    color: var(--ink);
+    line-height: 1.4;
+  }
+
+  /* Mistakes */
+  .mistakes { list-style: none; display: grid; gap: 0.55rem; }
+  .mistakes li {
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+    padding-left: 1.5rem;
+    position: relative;
+    line-height: 1.45;
+  }
+  .mistakes li::before {
+    content: "✕";
+    position: absolute; left: 0; top: 0;
+    color: var(--clay);
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+
+  .footer-note {
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--ink-mute);
+    margin-top: 3rem;
+    letter-spacing: 0.03em;
+  }
+  .footer-note strong { color: var(--clay-deep); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <h1>Cold Call Playbook</h1>
+    <p class="sub">Corgi · BDR Field Reference</p>
+    <p class="quote"><span class="mark">"</span>The money is already printed. You just gotta go get it.<span class="mark">"</span></p>
+    <hr class="rule">
+  </header>
+
+  <div class="shell">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <nav class="side-nav">
+        <button class="side-btn active" data-panel="script">
+          <span class="ico">📞</span>
+          <span class="lbl">Call Script<small>Openers · pitch · objections</small></span>
+        </button>
+        <button class="side-btn" data-panel="policy">
+          <span class="ico">🛡️</span>
+          <span class="lbl">Policies<small>Battle cards · triggers</small></span>
+        </button>
+      </nav>
+
+      <div class="side-jump" data-for="script">
+        <div class="side-jump-label">Jump to</div>
+        <a href="#s-open">The Open</a>
+        <a href="#s-pitch">The Pitch</a>
+        <a href="#s-obj">Objection Handling</a>
+      </div>
+      <div class="side-jump" data-for="policy" style="display:none;">
+        <div class="side-jump-label">Jump to</div>
+        <a href="#p-buy">How Startups Buy</a>
+        <a href="#p-cards">Battle Cards</a>
+        <a href="#p-mistakes">Common Mistakes</a>
+      </div>
+    </aside>
+
+    <!-- CONTENT -->
+    <main class="content">
+
+    <!-- ============ PANEL: CALL SCRIPT ============ -->
+    <section class="panel active" id="panel-script">
+
+  <!-- OPEN -->
+  <div class="eyebrow" id="s-open"><span class="n">1</span> The Open</div>
+  <div class="grid-2">
+    <div class="card">
+      <span class="tag">Opener A · Direct</span>
+      <p class="script-line"><strong><span class="fill">Name</span>!</strong> Hey, this is Carwyn. I'm calling on behalf of a Y Combinator-backed company called Corgi. Wanted to give you a quick call about <span class="fill">___</span>.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Opener B · Permission</span>
+      <p class="script-line">Hey, this is Carwyn, calling on behalf of a Y Combinator-backed company called Corgi. Could I steal 20 seconds? If it doesn't make sense, we shake hands and part ways. How's that sound?</p>
+    </div>
+  </div>
+
+  <!-- PITCH -->
+  <div class="eyebrow" id="s-pitch"><span class="n">2</span> The Pitch</div>
+  <div class="card">
+    <div class="card-label">Say this</div>
+    <p class="script-line">We handle business insurance for a lot of companies like <span class="fill">___</span>. I know it's a boring topic, but founders love us because we're a <strong>full-stack carrier</strong> and save them about <strong>30–40%</strong> on broker-issued premiums.</p>
+    <p class="script-line">Working with us means no Jake from State Farm, a quote in <strong>15 minutes</strong>, and coverage in <strong>24 hours</strong>.</p>
+    <p class="script-line">So — do you have 10 minutes later this week to get a proper quote?</p>
+  </div>
+
+  <!-- OBJECTIONS -->
+  <div class="eyebrow" id="s-obj"><span class="n">3</span> Objection Handling</div>
+
+  <div class="obj">
+    <div class="obj-head"><span class="badge">1</span> "We already have insurance"</div>
+    <div class="obj-body">
+      <p>90% of the companies we work with were already covered — they just didn't know they were paying a <strong>25–35% broker markup</strong> on top of what they actually needed. By law, you can cancel your current policy anytime and get a prorated refund. Ten minutes shows you whether there's a gap. Worth a look?</p>
+      <span class="then">If they say their rate is fine</span>
+      <p>Totally possible — and if the numbers back that up, I'll tell you. But most founders are surprised. That's the whole point of the review: it's free and it's fast.</p>
+    </div>
+  </div>
+
+  <div class="obj">
+    <div class="obj-head"><span class="badge">2</span> "We're too early / too small"</div>
+    <div class="obj-body">
+      <p>Most founders say that — until a customer contract or an investor diligence checklist asks for proof of coverage and they need it yesterday. The earlier you sort it, the less it costs and the less it distracts you later. Even if you're not buying today, a 10-minute review tells you exactly when you'll need what, so you're not scrambling.</p>
+      <span class="then">If they push back again</span>
+      <p>What does your customer contract situation look like right now — are you signing agreements with clients?</p>
+    </div>
+  </div>
+
+  <div class="obj">
+    <div class="obj-head"><span class="badge">3</span> "Not interested"</div>
+    <div class="obj-body">
+      <p>Totally fair. One quick thing before I let you go — do you have customer contracts or investor agreements in place right now?</p>
+      <span class="then">If yes</span>
+      <p>Then you're probably already exposed. Takes 10 minutes to know for sure — and it's free. That's the only ask.</p>
+      <span class="then">If no / still not interested</span>
+      <p>Understood. Can I follow up in a month when things might have moved? I'll put a note in and reach out then.</p>
+    </div>
+  </div>
+
+  <div class="obj">
+    <div class="obj-head"><span class="badge">4</span> "Just send me an email"</div>
+    <div class="obj-body">
+      <p>Usually my customers have more questions once I send an email. How about this — I send you an email <em>and</em> a tentative invite for next week. If you like what we do, we confirm the time. If you don't, you cancel it. Fair?</p>
+    </div>
+  </div>
+
+    </section>
+
+    <!-- ============ PANEL: POLICIES ============ -->
+    <section class="panel" id="panel-policy">
+
+  <!-- HOW STARTUPS BUY -->
+  <div class="eyebrow" id="p-buy"><span class="n">1</span> How Startups Actually Buy</div>
+  <div class="card">
+    <div class="card-label">The 3 forcing functions</div>
+    <p class="script-line">Startups don't buy insurance because they want to — they buy because something <strong>forces</strong> the decision. If one of these exists, insurance will come up.</p>
+    <div class="forces">
+      <div class="force"><span class="force-t">Customers</span><span class="force-d">Procurement, MSAs, COIs, security reviews</span></div>
+      <div class="force"><span class="force-t">Investors &amp; boards</span><span class="force-d">Governance, diligence, D&amp;O requirements</span></div>
+      <div class="force"><span class="force-t">Landlords &amp; vendors</span><span class="force-d">Leases, events, vendor onboarding</span></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:0.85rem;">
+    <div class="card-label">Quick picks · match the trigger</div>
+    <ul class="picks">
+      <li><span class="pk-when">Selling B2B / enterprise contracts</span><span class="pk-arrow">→</span><span class="pk-pol">Tech E&amp;O, Cyber, CGL</span></li>
+      <li><span class="pk-when">Fundraising / board involvement</span><span class="pk-arrow">→</span><span class="pk-pol">D&amp;O</span></li>
+      <li><span class="pk-when">Hiring or managing people</span><span class="pk-arrow">→</span><span class="pk-pol">EPLI</span></li>
+      <li><span class="pk-when">Handling customer data or payments</span><span class="pk-arrow">→</span><span class="pk-pol">Cyber</span></li>
+      <li><span class="pk-when">Leases, vendors, events</span><span class="pk-arrow">→</span><span class="pk-pol">CGL</span></li>
+    </ul>
+  </div>
+
+  <!-- FULL BATTLE CARDS -->
+  <div class="eyebrow" id="p-cards"><span class="n">2</span> Policy Battle Cards</div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">D&amp;O</span>
+      <div class="bcard-title">Founder &amp; Board Protection<span class="bcard-full">Directors &amp; Officers</span></div>
+      <span class="bcard-req">Often required by VCs</span>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">The <strong>personal assets</strong> of founders, executives, and board members.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Leadership decisions get challenged by investors, employees, or advisors. These claims target <em>people</em>, not just the company.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Fundraising · board formation · investor disputes</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Term sheet, priced round, or adding independent directors</span></div>
+    </div>
+    <div class="bcard-line">"Protects you personally if an investor, employee, or board member challenges leadership decisions."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">Tech E&amp;O</span>
+      <div class="bcard-title">Product Liability<span class="bcard-full">Errors &amp; Omissions</span></div>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Claims that your product, software, or AI <strong>didn't perform as expected</strong> and caused customer financial loss.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Customers don't sue because of bugs — they sue because bugs cost them money.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Paying customers · enterprise contracts · SLAs or implementation work</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">MSA/SOW insurance requirements or procurement review</span></div>
+    </div>
+    <div class="bcard-line">"If a customer says your product cost them money, this is the policy that responds."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">Cyber</span>
+      <div class="bcard-title">Data &amp; Breach Risk<span class="bcard-full">Cyber Liability</span></div>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Costs from data exposure, hacks, ransomware, and system breaches.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Startups move fast, store sensitive data, and rely on modern infrastructure — breaches happen early and often.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Handling customer data · APIs and integrations · security questionnaires</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Customer security review or handling regulated/sensitive data</span></div>
+    </div>
+    <div class="bcard-line">"If data gets exposed or systems get locked, this is what pays to respond."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">CGL</span>
+      <div class="bcard-title">Basic Business Risk<span class="bcard-full">Commercial General Liability</span></div>
+      <span class="bcard-req">Often contractually required</span>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Everyday accidents involving <strong>bodily injury or property damage</strong> tied to the business.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Baseline coverage most third parties expect before working with you.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Office leases · vendors and partners · events and onsite work</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Lease signature, vendor onboarding, or event venue requirements</span></div>
+    </div>
+    <div class="bcard-line">"Baseline coverage landlords and partners expect before doing business."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">EPLI</span>
+      <div class="bcard-title">Employee Lawsuits<span class="bcard-full">Employment Practices Liability</span></div>
+      <span class="bcard-req">Critical as hiring begins</span>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Claims from employees or candidates — discrimination, harassment, retaliation, wrongful termination.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">People-related risk grows faster than founders expect.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">First hires · manager promotions · performance issues or terminations</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Hiring ramp or first termination</span></div>
+    </div>
+    <div class="bcard-line">"Once you hire, this protects you if someone challenges how they were treated."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">Media</span>
+      <div class="bcard-title">Marketing &amp; Content Risk<span class="bcard-full">Media Liability</span></div>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Claims tied to ads, websites, and content — copyright, defamation, misrepresentation.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Marketing scales faster than legal review.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Paid ads · publishing content · competitive categories or AI-generated content</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Scaling marketing, PR, or content-heavy features</span></div>
+    </div>
+    <div class="bcard-line">"Protects you if your marketing or content triggers a legal claim."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">HNOA</span>
+      <div class="bcard-title">Hired &amp; Non-Owned Auto</div>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Company liability when employees drive <strong>personal or rented vehicles</strong> for work.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Even if you don't own cars, your company can still be named in an auto-related claim.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Sales teams · business travel · enterprise contract checklists</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Customer contract requires auto liability</span></div>
+    </div>
+    <div class="bcard-line">"Covers the company if an employee causes an accident while driving for work."</div>
+  </div>
+
+  <div class="bcard">
+    <div class="bcard-top">
+      <span class="bcard-abbr">Fiduciary</span>
+      <div class="bcard-title">Benefits &amp; 401(k) Risk</div>
+    </div>
+    <div class="bcard-grid">
+      <div class="bc-row"><span class="bc-k">Covers</span><span class="bc-v">Claims tied to managing employee benefit plans like 401(k)s and health plans.</span></div>
+      <div class="bc-row"><span class="bc-k">Why it matters</span><span class="bc-v">Benefits decisions create fiduciary responsibility — even when vendors are outsourced.</span></div>
+      <div class="bc-row"><span class="bc-k">Shows up</span><span class="bc-v">Launching a 401(k) · scaling benefits · later-stage diligence</span></div>
+      <div class="bc-row"><span class="bc-k">Trigger</span><span class="bc-v">Offering a 401(k) or expanding benefits</span></div>
+    </div>
+    <div class="bcard-line">"Protects leadership if employees challenge how benefits are managed."</div>
+  </div>
+
+  <!-- MISTAKES -->
+  <div class="eyebrow" id="p-mistakes"><span class="n">3</span> Common Startup Mistakes</div>
+  <div class="card">
+    <ul class="mistakes">
+      <li>Waiting until a contract or term sheet is due</li>
+      <li>Assuming CGL covers product failures</li>
+      <li>Skipping D&amp;O until investors demand it</li>
+      <li>Underinsuring cyber despite real data exposure</li>
+      <li>Forgetting HNOA because the company doesn't own vehicles</li>
+    </ul>
+  </div>
+
+  <p class="footer-note">Direct: D&amp;O, Cyber, Tech E&amp;O, EPLI. <strong>Anything else, we place it.</strong></p>
+
+    </section>
+
+    </main>
+  </div><!-- /shell -->
+
+</div>
+
+<script>
+  const btns = document.querySelectorAll('.side-btn');
+  const panels = {
+    script: document.getElementById('panel-script'),
+    policy: document.getElementById('panel-policy')
+  };
+  const jumps = document.querySelectorAll('.side-jump');
+
+  function activate(name) {
+    btns.forEach(b => b.classList.toggle('active', b.dataset.panel === name));
+    Object.keys(panels).forEach(k => panels[k].classList.toggle('active', k === name));
+    jumps.forEach(j => j.style.display = (j.dataset.for === name) ? '' : 'none');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  btns.forEach(b => b.addEventListener('click', () => activate(b.dataset.panel)));
+
+  // Smooth-scroll jump links without losing panel state
+  document.querySelectorAll('.side-jump a').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const el = document.querySelector(a.getAttribute('href'));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+</body>
+</html>

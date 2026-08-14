@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 import TeamArrRing from "./components/TeamArrRing";
 
 // Small stroke icon wrapper (Lucide-style paths) used by the playbook panels.
-function Ico({ children }: { children: ReactNode }) {
+function Ico({ children, size = 17 }: { children: ReactNode; size?: number }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      width="17"
-      height="17"
+      width={size}
+      height={size}
       fill="none"
       stroke="currentColor"
       strokeWidth={1.6}
@@ -227,6 +227,106 @@ function DashboardCard({
   );
 }
 
+// A single wide "AI tool" card. Visually distinct from the two square dashboard
+// cards (horizontal layout, sparkle icon) so an external AI assistant reads as a
+// different kind of thing. Opens the Clark GPT in a new tab.
+function ClarkCard() {
+  return (
+    <a
+      href="https://chatgpt.com/g/g-6a7f417c4f588191a86af1359040123e-clark-outbound-equilibrium"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group mt-6 flex items-center gap-5 rounded-3xl border border-white/50 bg-gradient-to-b from-white/70 to-white/35 p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-14px_rgba(0,0,0,0.22)] backdrop-blur-2xl backdrop-saturate-150 transition-all hover:-translate-y-1 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.7),0_18px_40px_-14px_rgba(0,0,0,0.28)] dark:border-white/[0.12] dark:from-white/[0.10] dark:to-white/[0.03] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.10),0_12px_34px_-14px_rgba(0,0,0,0.55)]"
+    >
+      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-corgi-ginger/10 text-corgi-ginger">
+        <Ico size={26}>
+          <path d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z" />
+          <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
+        </Ico>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-400 dark:text-neutral-500">
+          AI · Sales Development
+        </p>
+        <h2 className="mt-0.5 text-xl font-semibold tracking-tight">
+          Clark — Outbound Equilibrium
+        </h2>
+        <p className="mt-1 text-[13px] leading-snug text-neutral-600 dark:text-neutral-300">
+          Your outbound co-pilot — draft cold emails, sequences, and call openers
+          that stay on-message and on-cadence.
+        </p>
+      </div>
+      <span className="ml-2 hidden shrink-0 items-center gap-1.5 rounded-full bg-corgi-ginger px-4 py-2 text-sm font-medium text-white transition-transform group-hover:translate-x-0.5 sm:inline-flex">
+        Open in ChatGPT
+        <svg
+          viewBox="0 0 24 24"
+          width="15"
+          height="15"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M7 17 17 7" />
+          <path d="M7 7h10v10" />
+        </svg>
+      </span>
+    </a>
+  );
+}
+
+// Wide card for the static Cold Call Playbook reference (served from
+// /public/playbook/index.html). Same horizontal shape as the Clark card so the
+// two "field tools" read as a pair, but an internal link (opens in this tab like
+// the dashboards) with a phone icon.
+function ColdCallPlaybookCard() {
+  return (
+    <a
+      href="/playbook/index.html"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group mt-6 flex items-center gap-5 rounded-3xl border border-white/50 bg-gradient-to-b from-white/70 to-white/35 p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-14px_rgba(0,0,0,0.22)] backdrop-blur-2xl backdrop-saturate-150 transition-all hover:-translate-y-1 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.7),0_18px_40px_-14px_rgba(0,0,0,0.28)] dark:border-white/[0.12] dark:from-white/[0.10] dark:to-white/[0.03] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.10),0_12px_34px_-14px_rgba(0,0,0,0.55)]"
+    >
+      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-corgi-ginger/10 text-corgi-ginger">
+        <Ico size={26}>
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+        </Ico>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-400 dark:text-neutral-500">
+          Reference · BDR Field Guide
+        </p>
+        <h2 className="mt-0.5 text-xl font-semibold tracking-tight">
+          Cold Call Playbook
+        </h2>
+        <p className="mt-1 text-[13px] leading-snug text-neutral-600 dark:text-neutral-300">
+          Openers, pitch, and objection handling plus the policy battle cards —
+          your on-call field reference.
+        </p>
+      </div>
+      <span className="ml-2 hidden shrink-0 items-center gap-1.5 rounded-full bg-corgi-ginger px-4 py-2 text-sm font-medium text-white transition-transform group-hover:translate-x-0.5 sm:inline-flex">
+        Open
+        <svg
+          viewBox="0 0 24 24"
+          width="15"
+          height="15"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M7 17 17 7" />
+          <path d="M7 7h10v10" />
+        </svg>
+      </span>
+    </a>
+  );
+}
+
 export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-10 sm:px-6 lg:px-8">
@@ -259,6 +359,8 @@ export default function Home() {
           description="Rep activity and revenue — dials, demos booked, show rate, sourced ARR, and BDR & AE progress."
         />
       </div>
+      <ClarkCard />
+      <ColdCallPlaybookCard />
 
       <div className="mt-8 mb-6 text-center">
         <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
