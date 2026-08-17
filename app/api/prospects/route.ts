@@ -567,6 +567,22 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   // now come straight from HubSpot (no Corgi enrichment), so the owned rows are
   // the final rows.
   const owned = collapseCrossBdr(deduped);
+
+  // Fold the COMPANY's last-contacted date into "Last Rep Contact". Reps log a
+  // lot of email against the company record rather than the deal, so the deal's
+  // own notes_last_contacted can lag; here we show the newest of the deal date
+  // and the company's activity date (both plain "YYYY-MM-DD", so a string
+  // compare gives the later one). This runs AFTER ownership is resolved on
+  // purpose: the cross-BDR "who owns this company" decision above must keep using
+  // each deal's OWN signals, so pulling in the shared company date can never move
+  // a deal (or its money) to a different rep. It only ever pushes the displayed
+  // date forward — never backward, never null.
+  for (const r of owned) {
+    const companyDay = engagements.get(String(r.id))?.companyLastContact ?? null;
+    if (companyDay && (!r.lastContact || companyDay > r.lastContact)) {
+      r.lastContact = companyDay;
+    }
+  }
   return owned;
 }
 
@@ -588,7 +604,7 @@ export const getCachedProspects = unstable_cache(
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v14"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v15"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 

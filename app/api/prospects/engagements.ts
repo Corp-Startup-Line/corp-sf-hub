@@ -220,7 +220,19 @@ export type Engagement = {
   lastInbound: string | null; // last POSITIVE CONTACT: a connected call (either
   // direction) or an incoming email from the customer's contacts
   lastBdrOutbound: string | null; // last outbound call attempt by one of our BDRs
+  companyLastContact: string | null; // newest logged activity on the deal's
+  // associated COMPANY record (reps often log emails against the company, not
+  // the deal) — used to move "Last Rep Contact" forward when the company is newer
 };
+
+// Company-level activity stamps we read to mirror the deal's own "last contacted"
+// logic: the last logged call/email/meeting (notes_last_contacted), the broader
+// last activity (notes_last_updated), and the last sales-activity timestamp.
+const COMPANY_ACTIVITY_PROPS = [
+  "notes_last_contacted",
+  "notes_last_updated",
+  "hs_last_sales_activity_timestamp",
+];
 
 // Attach engagement dates to every deal id. `isBdrOwner` decides whether a
 // call's owner id belongs to our BDR team (so an AE's outbound call doesn't
@@ -231,10 +243,12 @@ export async function enrichEngagements(
   dealIds: string[],
   isBdrOwner: (ownerId: string | null | undefined) => boolean,
 ): Promise<Map<string, Engagement>> {
-  // deal → its calls (direct) and deal → its contacts (for emails).
-  const [dealCalls, dealContacts] = await Promise.all([
+  // deal → its calls (direct), deal → its contacts (for emails), and deal → its
+  // company (for company-level "last contacted").
+  const [dealCalls, dealContacts, dealCompanies] = await Promise.all([
     assocBatch(token, "deals", "calls", dealIds),
     assocBatch(token, "deals", "contacts", dealIds),
+    assocBatch(token, "deals", "companies", dealIds),
   ]);
 
   // contact → emails, for every contact linked to any of our deals.
@@ -246,10 +260,11 @@ export async function enrichEngagements(
     allContactIds,
   );
 
-  // Read the properties we actually need off the calls and emails.
+  // Read the properties we actually need off the calls, emails, and companies.
   const allCallIds = uniq([...dealCalls.values()].flat());
   const allEmailIds = uniq([...contactEmails.values()].flat());
-  const [callProps, emailProps, connectedIds] = await Promise.all([
+  const allCompanyIds = uniq([...dealCompanies.values()].flat());
+  const [callProps, emailProps, connectedIds, companyProps] = await Promise.all([
     objBatch(token, "calls", allCallIds, [
       "hs_call_direction",
       "hs_timestamp",
@@ -261,6 +276,7 @@ export async function enrichEngagements(
       "hs_timestamp",
     ]),
     connectedDispositions(token),
+    objBatch(token, "companies", allCompanyIds, COMPANY_ACTIVITY_PROPS),
   ]);
 
   const out = new Map<string, Engagement>();
@@ -302,9 +318,22 @@ export async function enrichEngagements(
       }
     }
 
+    // Newest activity stamp across the deal's associated company record(s). Reps
+    // log a lot of email against the COMPANY rather than the deal, so this is
+    // often more recent than the deal's own last-contacted date.
+    let companyLast: string | null = null;
+    for (const companyId of dealCompanies.get(dealId) ?? []) {
+      const cp = companyProps.get(companyId);
+      if (!cp) continue;
+      for (const prop of COMPANY_ACTIVITY_PROPS) {
+        companyLast = laterIso(companyLast, cp[prop] ?? null);
+      }
+    }
+
     out.set(dealId, {
       lastInbound: toDay(lastInbound),
       lastBdrOutbound: toDay(lastBdrOutbound),
+      companyLastContact: toDay(companyLast),
     });
   }
   return out;
