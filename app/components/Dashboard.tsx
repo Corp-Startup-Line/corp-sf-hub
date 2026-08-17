@@ -216,6 +216,7 @@ export default function Dashboard() {
             sortByWon={sortByWon}
             stageFilter={stageFilter}
             onStageFilter={selectStage}
+            singleRep={singleRep}
           />
         </>
       )}

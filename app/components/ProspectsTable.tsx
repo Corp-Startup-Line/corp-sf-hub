@@ -129,12 +129,17 @@ export default function ProspectsTable({
   sortByWon,
   stageFilter,
   onStageFilter,
+  singleRep,
 }: {
   rows: Prospect[];
   wonOnly: boolean;
   sortByWon: boolean;
   stageFilter: Stage | "all";
   onStageFilter: (s: Stage | "all") => void;
+  // True when one BDR or AE is in focus. The "Needs your eyes" strip is a
+  // personal to-do — it only makes sense for a single rep — so it's hidden on
+  // the aggregate main page and shown only inside a BDR or AE view.
+  singleRep: boolean;
 }) {
   const [search, setSearch] = useState("");
   // A month filter LOCAL to this table (like the search box), so you can narrow
@@ -267,7 +272,7 @@ export default function ProspectsTable({
           other than its rep just touched. One card per flagged deal, scrolled
           horizontally, each linking straight to the deal in HubSpot. Only shown
           when there's a backlog to clear. */}
-      {flagged.length > 0 && (
+      {singleRep && flagged.length > 0 && (
         <div className="mb-4 rounded-2xl border border-corgi-ginger/30 bg-gradient-to-b from-corgi-ginger/[0.12] to-corgi-ginger/[0.04] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.5)] backdrop-blur-2xl backdrop-saturate-150 dark:border-corgi-ginger/25">
           <div className="mb-3 flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-corgi-ginger" />
