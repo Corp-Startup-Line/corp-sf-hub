@@ -177,8 +177,13 @@ export default function ProspectsTable({
     [rows],
   );
 
-  // Filter (stage + month + won-only + search), then sort. useMemo = only recompute when inputs change.
-  const processed = useMemo(() => {
+  // The shared filtered set — everything the table shows EXCEPT the "touched by
+  // others" pill and sorting: stage, won-only, month and search. The BDR / AE /
+  // month filters up top already shaped `rows`. Both the flagged list (the strip
+  // and the count badges) and the final table build on THIS, so the strip always
+  // reflects the same scope you're viewing — never the whole team once you've
+  // narrowed down to one BDR, stage or search.
+  const filtered = useMemo(() => {
     // Match by EFFECTIVE stage — the same Corgi-quote-aware definition the
     // funnel cards use — so clicking any card (including "Quoted") shows exactly
     // the deals that card counted, and never a Meeting-Booked/Closed-Won stray.
@@ -188,7 +193,6 @@ export default function ProspectsTable({
         : rows.filter((r) => effectiveStage(r) === stageFilter);
     if (wonOnly) out = out.filter((r) => r.stage === "Closed Won");
     if (monthFilter !== "all") out = out.filter((r) => r.month === monthFilter);
-    if (touchedByOthers) out = out.filter(isFlagged);
 
     // Search matches any field a BDR might type to find a deal: company,
     // contact, BDR, AE, stage, or notes — so "any deal they want to see" is one
@@ -202,7 +206,28 @@ export default function ProspectsTable({
           .includes(q),
       );
     }
+    return out;
+  }, [rows, wonOnly, stageFilter, monthFilter, search]);
 
+  // Every flagged deal in the CURRENT view (respects the BDR / stage / month /
+  // search scope above), newest outside-touch first — feeds the count badges and
+  // the "Needs your eyes" strip, so the strip always matches what you're viewing.
+  const flagged = useMemo(
+    () =>
+      filtered
+        .filter(isFlagged)
+        .sort((a, b) =>
+          (b.outsideActivity?.date ?? "").localeCompare(
+            a.outsideActivity?.date ?? "",
+          ),
+        ),
+    [filtered],
+  );
+
+  // The table: apply the "touched by others" pill on top of the shared set, then
+  // sort. useMemo = only recompute when inputs change.
+  const processed = useMemo(() => {
+    const out = touchedByOthers ? filtered.filter(isFlagged) : filtered;
     const sorted = [...out].sort((a, b) => {
       // The "Quote" column shows the deal's Corgi value (dealValue), so sort by
       // that same figure rather than the raw HubSpot amount.
@@ -225,23 +250,7 @@ export default function ProspectsTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [rows, wonOnly, stageFilter, monthFilter, touchedByOthers, search, sortKey, sortDir]);
-
-  // Every flagged deal in the CURRENT view (respects the whole-dashboard BDR /
-  // stage / month scoping that already shaped `rows`), newest outside-touch
-  // first — feeds the count badges and the "Needs your eyes" strip. Independent
-  // of the local table filters so the strip always shows the full backlog.
-  const flagged = useMemo(
-    () =>
-      rows
-        .filter(isFlagged)
-        .sort((a, b) =>
-          (b.outsideActivity?.date ?? "").localeCompare(
-            a.outsideActivity?.date ?? "",
-          ),
-        ),
-    [rows],
-  );
+  }, [filtered, touchedByOthers, sortKey, sortDir]);
 
   // Pagination maths.
   const totalPages = Math.max(1, Math.ceil(processed.length / pageSize));
