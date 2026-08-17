@@ -117,6 +117,15 @@ export type Prospect = {
   // Undefined on the sample rows below; set for every live deal.
   lastInbound?: string | null;     // last time the CUSTOMER reached in (inbound call / incoming email)
   lastBdrOutbound?: string | null; // last outbound CALL a BDR made (emails omitted — owner unreliable)
+  // The newest activity on this deal logged by SOMEONE OTHER than the deal's own
+  // rep (usually the AE). Drives the "someone else touched your deal" alert.
+  // null = no outside activity on record. `who` is null when HubSpot recorded no
+  // owner (common for emails). Undefined on the sample rows below.
+  outsideActivity?: {
+    date: string;       // "YYYY-MM-DD"
+    who: string | null; // teammate's name, or null = "someone else"
+    action: string;     // "logged a call" / "sent an email" / "logged a meeting" / "added a note"
+  } | null;
   // ---- Extra fields the Corp SF Metrics page reads (attached by the server) ---
   // So Metrics can bucket a won deal into the right week and split it
   // inbound/outbound off the SAME rows Pipeline uses. Undefined on sample rows.

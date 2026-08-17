@@ -216,100 +216,167 @@ function toDay(iso: string | null): string | null {
   return iso ? iso.slice(0, 10) : null;
 }
 
+// A single activity by someone OTHER than the deal's own rep — used to alert the
+// rep that a teammate (usually the AE) touched their deal. `who` is the person's
+// name when HubSpot records an owner (calls/meetings/notes always do; emails
+// often don't → null = "someone else").
+export type OutsideActivity = {
+  date: string; // "YYYY-MM-DD"
+  who: string | null; // teammate's name, or null when HubSpot didn't record one
+  action: string; // human label: "logged a call" / "sent an email" / …
+};
+
 export type Engagement = {
   lastInbound: string | null; // last POSITIVE CONTACT: a connected call (either
   // direction) or an incoming email from the customer's contacts
   lastBdrOutbound: string | null; // last outbound call attempt by one of our BDRs
-  companyLastContact: string | null; // newest logged activity on the deal's
-  // associated COMPANY record (reps often log emails against the company, not
-  // the deal) — used to move "Last Rep Contact" forward when the company is newer
+  repLastContact: string | null; // newest activity attributable to THIS deal's OWN
+  // rep, across the deal, its contacts, and its company (calls/meetings/notes the
+  // rep owns, plus outgoing emails). This is the real "Last Rep Contact".
+  outside: OutsideActivity | null; // newest activity NOT attributable to the rep
+  // (a teammate logging a call/email/meeting/note on the rep's deal)
 };
 
-// Company-level activity stamps we read to mirror the deal's own "last contacted"
-// logic: the last logged call/email/meeting (notes_last_contacted), the broader
-// last activity (notes_last_updated), and the last sales-activity timestamp.
-const COMPANY_ACTIVITY_PROPS = [
-  "notes_last_contacted",
-  "notes_last_updated",
-  "hs_last_sales_activity_timestamp",
-];
+// Options describing, per deal, who the deal's own rep is — so we can split every
+// activity into "the rep did this" vs "someone else did this".
+export type EnrichOptions = {
+  bdrOwnerIds: Set<string>; // every rostered BDR's HubSpot user id (for lastBdrOutbound)
+  repOwnerByDeal: Map<string, string | undefined>; // deal id → that deal's own rep's user id
+  ownerName: (ownerId: string | null | undefined) => string | null; // user id → display name
+};
 
-// Attach engagement dates to every deal id. `isBdrOwner` decides whether a
-// call's owner id belongs to our BDR team (so an AE's outbound call doesn't
-// count as BDR outreach). Best-effort: any batch that fails is simply skipped,
-// leaving that signal null rather than failing the whole dashboard.
+// Attach engagement dates to every deal id. Best-effort: any batch that fails is
+// simply skipped, leaving that signal null rather than failing the whole dashboard.
+//
+// "Last Rep Contact" (repLastContact) counts only activity we can attribute to the
+// deal's OWN rep: calls, meetings and notes whose HubSpot owner IS that rep, plus
+// OUTGOING emails on the deal/contacts/company (this portal usually leaves email
+// owner blank, so an owner-less outgoing email is treated as the rep's own; an
+// outgoing email owned by a DIFFERENT person is not). Customer INBOUND emails
+// never count as rep activity. Anything owned by a different teammate becomes the
+// deal's "outside activity" alert.
 export async function enrichEngagements(
   token: string,
   dealIds: string[],
-  isBdrOwner: (ownerId: string | null | undefined) => boolean,
+  opts: EnrichOptions,
 ): Promise<Map<string, Engagement>> {
-  // deal → its calls (direct), deal → its contacts (for emails), and deal → its
-  // company (for company-level "last contacted").
-  const [dealCalls, dealContacts, dealCompanies] = await Promise.all([
-    assocBatch(token, "deals", "calls", dealIds),
-    assocBatch(token, "deals", "contacts", dealIds),
-    assocBatch(token, "deals", "companies", dealIds),
-  ]);
+  const { bdrOwnerIds, repOwnerByDeal, ownerName } = opts;
 
-  // contact → emails, for every contact linked to any of our deals.
+  // deal → its calls / meetings / notes (all associate directly to the deal),
+  // deal → its contacts (emails hang off contacts), deal → its company.
+  const [dealCalls, dealMeetings, dealNotes, dealContacts, dealCompanies] =
+    await Promise.all([
+      assocBatch(token, "deals", "calls", dealIds),
+      assocBatch(token, "deals", "meetings", dealIds),
+      assocBatch(token, "deals", "notes", dealIds),
+      assocBatch(token, "deals", "contacts", dealIds),
+      assocBatch(token, "deals", "companies", dealIds),
+    ]);
+
+  // Emails hang off contacts; company-level activity (reps often log against the
+  // company, not the deal) hangs off the company. Fetch both sets of associations.
   const allContactIds = uniq([...dealContacts.values()].flat());
-  const contactEmails = await assocBatch(
-    token,
-    "contacts",
-    "emails",
-    allContactIds,
-  );
-
-  // Read the properties we actually need off the calls, emails, and companies.
-  const allCallIds = uniq([...dealCalls.values()].flat());
-  const allEmailIds = uniq([...contactEmails.values()].flat());
   const allCompanyIds = uniq([...dealCompanies.values()].flat());
-  const [callProps, emailProps, connectedIds, companyProps] = await Promise.all([
-    objBatch(token, "calls", allCallIds, [
-      "hs_call_direction",
-      "hs_timestamp",
-      "hubspot_owner_id",
-      "hs_call_disposition",
-    ]),
-    objBatch(token, "emails", allEmailIds, [
-      "hs_email_direction",
-      "hs_timestamp",
-    ]),
-    connectedDispositions(token),
-    objBatch(token, "companies", allCompanyIds, COMPANY_ACTIVITY_PROPS),
+  const [contactEmails, companyCalls, companyMeetings, companyNotes, companyEmails] =
+    await Promise.all([
+      assocBatch(token, "contacts", "emails", allContactIds),
+      assocBatch(token, "companies", "calls", allCompanyIds),
+      assocBatch(token, "companies", "meetings", allCompanyIds),
+      assocBatch(token, "companies", "notes", allCompanyIds),
+      assocBatch(token, "companies", "emails", allCompanyIds),
+    ]);
+
+  // Read the properties we need off every engagement object (deduped across the
+  // deal- and company-level sources so each object is fetched once).
+  const allCallIds = uniq([
+    ...[...dealCalls.values()].flat(),
+    ...[...companyCalls.values()].flat(),
   ]);
+  const allMeetingIds = uniq([
+    ...[...dealMeetings.values()].flat(),
+    ...[...companyMeetings.values()].flat(),
+  ]);
+  const allNoteIds = uniq([
+    ...[...dealNotes.values()].flat(),
+    ...[...companyNotes.values()].flat(),
+  ]);
+  const allEmailIds = uniq([
+    ...[...contactEmails.values()].flat(),
+    ...[...companyEmails.values()].flat(),
+  ]);
+  const [callProps, meetingProps, noteProps, emailProps, connectedIds] =
+    await Promise.all([
+      objBatch(token, "calls", allCallIds, [
+        "hs_call_direction",
+        "hs_timestamp",
+        "hubspot_owner_id",
+        "hs_call_disposition",
+      ]),
+      objBatch(token, "meetings", allMeetingIds, [
+        "hs_timestamp",
+        "hubspot_owner_id",
+      ]),
+      objBatch(token, "notes", allNoteIds, ["hs_timestamp", "hubspot_owner_id"]),
+      objBatch(token, "emails", allEmailIds, [
+        "hs_email_direction",
+        "hs_timestamp",
+        "hubspot_owner_id",
+      ]),
+      connectedDispositions(token),
+    ]);
+
+  // Per-deal id gatherers: an activity "belongs" to a deal if it's on the deal
+  // itself or on the deal's associated company (emails also via the contacts).
+  const companyIdsOf = (dealId: string) => dealCompanies.get(dealId) ?? [];
+  const callsOf = (dealId: string) =>
+    uniq([
+      ...(dealCalls.get(dealId) ?? []),
+      ...companyIdsOf(dealId).flatMap((co) => companyCalls.get(co) ?? []),
+    ]);
+  const meetingsOf = (dealId: string) =>
+    uniq([
+      ...(dealMeetings.get(dealId) ?? []),
+      ...companyIdsOf(dealId).flatMap((co) => companyMeetings.get(co) ?? []),
+    ]);
+  const notesOf = (dealId: string) =>
+    uniq([
+      ...(dealNotes.get(dealId) ?? []),
+      ...companyIdsOf(dealId).flatMap((co) => companyNotes.get(co) ?? []),
+    ]);
+  const emailsOf = (dealId: string) =>
+    uniq([
+      ...(dealContacts.get(dealId) ?? []).flatMap(
+        (cid) => contactEmails.get(cid) ?? [],
+      ),
+      ...companyIdsOf(dealId).flatMap((co) => companyEmails.get(co) ?? []),
+    ]);
 
   const out = new Map<string, Engagement>();
   for (const dealId of dealIds) {
+    // lastInbound / lastBdrOutbound keep their ORIGINAL meaning and sources (the
+    // deal's own calls + the deal's contacts' incoming emails) so cross-BDR
+    // ownership — which reads lastInbound — is unchanged.
     let lastInbound: string | null = null;
     let lastBdrOutbound: string | null = null;
-
-    // Calls give us direction, the caller, and whether it connected.
     for (const callId of dealCalls.get(dealId) ?? []) {
       const p = callProps.get(callId);
       const ts = p?.hs_timestamp ?? null;
       if (!ts) continue;
-      const dir = p?.hs_call_direction;
-      // A connected call in EITHER direction is positive contact — an inbound
-      // call the customer picked up, or an outbound call of ours that got
-      // through. A rung-out / voicemail call is not.
       if (connectedIds.has(p?.hs_call_disposition ?? "")) {
         lastInbound = laterIso(lastInbound, ts);
       }
-      // Any outbound call by one of our BDRs counts as "reached out", whether or
-      // not it connected (this is the last-contacted attempt date).
-      if (dir === "OUTBOUND" && isBdrOwner(p?.hubspot_owner_id)) {
+      if (
+        p?.hs_call_direction === "OUTBOUND" &&
+        bdrOwnerIds.has(p?.hubspot_owner_id ?? "")
+      ) {
         lastBdrOutbound = laterIso(lastBdrOutbound, ts);
       }
     }
-
-    // Incoming emails (via the deal's contacts) count as inbound contact too.
-    const emailIds = uniq(
+    for (const emailId of uniq(
       (dealContacts.get(dealId) ?? []).flatMap(
         (cid) => contactEmails.get(cid) ?? [],
       ),
-    );
-    for (const emailId of emailIds) {
+    )) {
       const p = emailProps.get(emailId);
       const ts = p?.hs_timestamp ?? null;
       if (!ts) continue;
@@ -318,22 +385,82 @@ export async function enrichEngagements(
       }
     }
 
-    // Newest activity stamp across the deal's associated company record(s). Reps
-    // log a lot of email against the COMPANY rather than the deal, so this is
-    // often more recent than the deal's own last-contacted date.
-    let companyLast: string | null = null;
-    for (const companyId of dealCompanies.get(dealId) ?? []) {
-      const cp = companyProps.get(companyId);
-      if (!cp) continue;
-      for (const prop of COMPANY_ACTIVITY_PROPS) {
-        companyLast = laterIso(companyLast, cp[prop] ?? null);
+    // repLastContact / outside: split every activity on the deal (and its
+    // company/contacts) into "the rep did it" vs "a teammate did it".
+    const repOwner = repOwnerByDeal.get(dealId); // may be undefined if unresolved
+    let repLast: string | null = null;
+    type OutsideAcc = { ts: string; tms: number; who: string | null; action: string };
+    // Held in an object so TypeScript keeps the union type across the closure
+    // that mutates it (a bare `let` would get narrowed to null).
+    const acc: { best: OutsideAcc | null } = { best: null };
+    // A teammate activity: only counted when we actually know the deal's rep (so
+    // we can be sure it wasn't them). Keeps the newest such activity.
+    const pushOutside = (
+      ts: string | null | undefined,
+      ownerId: string | null | undefined,
+      action: string,
+    ) => {
+      if (!ts || !repOwner || !ownerId || ownerId === repOwner) return;
+      const tms = new Date(ts).getTime();
+      if (!Number.isFinite(tms)) return;
+      if (!acc.best || tms > acc.best.tms) {
+        acc.best = { ts, tms, who: ownerName(ownerId), action };
+      }
+    };
+    const ownedByRep = (ownerId: string | null | undefined) =>
+      Boolean(repOwner) && ownerId === repOwner;
+
+    for (const callId of callsOf(dealId)) {
+      const p = callProps.get(callId);
+      const ts = p?.hs_timestamp ?? null;
+      if (!ts) continue;
+      const owner = p?.hubspot_owner_id ?? null;
+      if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
+      else pushOutside(ts, owner, "logged a call");
+    }
+    for (const mId of meetingsOf(dealId)) {
+      const p = meetingProps.get(mId);
+      const ts = p?.hs_timestamp ?? null;
+      if (!ts) continue;
+      const owner = p?.hubspot_owner_id ?? null;
+      if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
+      else pushOutside(ts, owner, "logged a meeting");
+    }
+    for (const nId of notesOf(dealId)) {
+      const p = noteProps.get(nId);
+      const ts = p?.hs_timestamp ?? null;
+      if (!ts) continue;
+      const owner = p?.hubspot_owner_id ?? null;
+      if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
+      else pushOutside(ts, owner, "added a note");
+    }
+    for (const eId of emailsOf(dealId)) {
+      const p = emailProps.get(eId);
+      const ts = p?.hs_timestamp ?? null;
+      if (!ts) continue;
+      // Customer inbound email is never OUR activity — skip entirely.
+      if (p?.hs_email_direction === "INCOMING_EMAIL") continue;
+      const owner = p?.hubspot_owner_id ?? null;
+      // Outgoing email owned by another teammate → outside; owner-less or the
+      // rep's own → the rep's activity (email owner is usually blank here).
+      if (owner && repOwner && owner !== repOwner) {
+        pushOutside(ts, owner, "sent an email");
+      } else {
+        repLast = laterIso(repLast, ts);
       }
     }
 
     out.set(dealId, {
       lastInbound: toDay(lastInbound),
       lastBdrOutbound: toDay(lastBdrOutbound),
-      companyLastContact: toDay(companyLast),
+      repLastContact: toDay(repLast),
+      outside: acc.best
+        ? {
+            date: toDay(acc.best.ts) as string,
+            who: acc.best.who,
+            action: acc.best.action,
+          }
+        : null,
     });
   }
   return out;

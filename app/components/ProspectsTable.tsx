@@ -64,6 +64,24 @@ const LEGEND: { health: DealHealth; label: string }[] = [
   { health: "won", label: "Won" },
 ];
 
+// "Touched by others" — a deal is FLAGGED when its newest activity was logged by
+// someone OTHER than the deal's own rep, AFTER the rep last touched it. The
+// backend hands us `outsideActivity` (the newest non-rep activity, with who/when/
+// action); we flag the row when that outside touch is newer than the rep's own
+// last contact. Dates are "YYYY-MM-DD" strings, so a plain string compare works.
+export function isFlagged(r: Prospect): boolean {
+  const o = r.outsideActivity;
+  return Boolean(o && o.date > (r.lastContact ?? ""));
+}
+
+// "2026-08-15" -> "Aug 15" — the compact form used in the flag column and the
+// "Needs your eyes" cards, where the year is just noise.
+function shortDate(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 // Which columns you can sort by, and how to read each value out of a row.
 type SortKey =
   | "company"
@@ -83,6 +101,10 @@ const INBOUND_HINT =
 const OUTBOUND_HINT =
   "Last time the rep touched the deal — any logged activity (call, email, meeting/invite, or note), from HubSpot's Last Activity.";
 
+// Plain-English tooltip for the "Outside activity" column.
+const OUTSIDE_HINT =
+  "The newest activity on this deal logged by someone OTHER than its own rep — who did it, and when. Blank if the rep is the most recent to touch it.";
+
 // Stages offered in the Stage filter dropdown. The funnel no longer has a
 // "Qualified" card, so the dropdown must not offer it either — otherwise you
 // could filter to a stage the funnel doesn't show. "Quoted" is also dropped:
@@ -97,7 +119,8 @@ const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "ae", label: "AE" },
   { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
   { key: "quote", label: "Quote (Corgi)" },
-  { key: "lastContact", label: "Last Rep Contact", hint: OUTBOUND_HINT },
+  { key: "lastContact", label: "Last Rep Contact (you)", hint: OUTBOUND_HINT },
+  { key: null, label: "Outside activity", hint: OUTSIDE_HINT },
 ];
 
 export default function ProspectsTable({
@@ -118,6 +141,10 @@ export default function ProspectsTable({
   // the deal list to one month without touching the whole-dashboard Month filter
   // up top (which also reshapes the KPIs, funnel and charts). "all" = every month.
   const [monthFilter, setMonthFilter] = useState<string>("all");
+  // "Touched by others" filter pill: when on, the table shows ONLY flagged deals
+  // (someone other than the rep logged the newest activity). Composes with every
+  // other filter below.
+  const [touchedByOthers, setTouchedByOthers] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("company");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -161,6 +188,7 @@ export default function ProspectsTable({
         : rows.filter((r) => effectiveStage(r) === stageFilter);
     if (wonOnly) out = out.filter((r) => r.stage === "Closed Won");
     if (monthFilter !== "all") out = out.filter((r) => r.month === monthFilter);
+    if (touchedByOthers) out = out.filter(isFlagged);
 
     // Search matches any field a BDR might type to find a deal: company,
     // contact, BDR, AE, stage, or notes — so "any deal they want to see" is one
@@ -197,7 +225,23 @@ export default function ProspectsTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [rows, wonOnly, stageFilter, monthFilter, search, sortKey, sortDir]);
+  }, [rows, wonOnly, stageFilter, monthFilter, touchedByOthers, search, sortKey, sortDir]);
+
+  // Every flagged deal in the CURRENT view (respects the whole-dashboard BDR /
+  // stage / month scoping that already shaped `rows`), newest outside-touch
+  // first — feeds the count badges and the "Needs your eyes" strip. Independent
+  // of the local table filters so the strip always shows the full backlog.
+  const flagged = useMemo(
+    () =>
+      rows
+        .filter(isFlagged)
+        .sort((a, b) =>
+          (b.outsideActivity?.date ?? "").localeCompare(
+            a.outsideActivity?.date ?? "",
+          ),
+        ),
+    [rows],
+  );
 
   // Pagination maths.
   const totalPages = Math.max(1, Math.ceil(processed.length / pageSize));
@@ -206,10 +250,55 @@ export default function ProspectsTable({
   const pageRows = processed.slice(start, start + pageSize);
 
   // Whenever the underlying data or page size changes, go back to page 1.
-  useEffect(() => setPage(1), [rows, wonOnly, stageFilter, monthFilter, search, pageSize]);
+  useEffect(() => setPage(1), [rows, wonOnly, stageFilter, monthFilter, touchedByOthers, search, pageSize]);
 
   return (
     <section className="mb-10">
+      {/* "Needs your eyes" strip — a warm banner listing every deal that someone
+          other than its rep just touched. One card per flagged deal, scrolled
+          horizontally, each linking straight to the deal in HubSpot. Only shown
+          when there's a backlog to clear. */}
+      {flagged.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-corgi-ginger/30 bg-gradient-to-b from-corgi-ginger/[0.12] to-corgi-ginger/[0.04] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.5)] backdrop-blur-2xl backdrop-saturate-150 dark:border-corgi-ginger/25">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-corgi-ginger" />
+            <h3 className="text-sm font-semibold text-corgi-ginger">
+              Needs your eyes
+            </h3>
+            <span className="rounded-full bg-corgi-ginger/20 px-2 py-0.5 text-xs font-medium tabular-nums text-corgi-ginger">
+              {flagged.length}
+            </span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              someone else logged the newest activity
+            </span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {flagged.map((r) => {
+              const o = r.outsideActivity!;
+              return (
+                <a
+                  key={r.id}
+                  href={hubspotUrl(r)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open this deal in HubSpot"
+                  className="flex w-56 shrink-0 flex-col gap-1 rounded-xl border border-white/60 bg-white/70 p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-corgi-ginger/40 dark:border-white/10 dark:bg-white/[0.06]"
+                >
+                  <span className="truncate font-medium text-neutral-800 dark:text-neutral-100">
+                    {r.company}
+                  </span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    You last touched {shortDate(r.lastContact)}
+                  </span>
+                  <span className="text-xs font-medium text-corgi-ginger">
+                    {o.who ?? "Someone else"} {o.action} {shortDate(o.date)}
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <SectionLabel>Deals ({processed.length})</SectionLabel>
         <div className="flex flex-wrap items-center gap-4">
@@ -241,6 +330,33 @@ export default function ProspectsTable({
               ))}
             </select>
           </label>
+          {/* "Touched by others" pill — filters the table to only flagged deals.
+              Shows the count so you can see the backlog at a glance; only appears
+              when there's at least one flagged deal in view. */}
+          {flagged.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setTouchedByOthers((v) => !v)}
+              title="Show only deals where someone other than the rep logged the newest activity"
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                touchedByOthers
+                  ? "border-corgi-ginger/50 bg-corgi-ginger/15 text-corgi-ginger"
+                  : "border-black/10 bg-white/70 text-neutral-600 hover:border-corgi-ginger/40 hover:text-corgi-ginger dark:border-white/15 dark:bg-white/10 dark:text-neutral-300"
+              }`}
+            >
+              <span className="h-2 w-2 rounded-full bg-corgi-ginger" />
+              Touched by others
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
+                  touchedByOthers
+                    ? "bg-corgi-ginger/25 text-corgi-ginger"
+                    : "bg-black/5 text-neutral-500 dark:bg-white/10 dark:text-neutral-400"
+                }`}
+              >
+                {flagged.length}
+              </span>
+            </button>
+          )}
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -303,21 +419,39 @@ export default function ProspectsTable({
           <tbody>
             {pageRows.map((r) => {
               const h = dealHealth(r);
+              // A flagged row (someone else logged the newest activity) takes the
+              // warm ginger treatment — ginger tint + ginger left-edge + a ginger
+              // dot beside the company — overriding the health colours so the
+              // alert reads at a glance.
+              const flag = isFlagged(r);
+              const o = r.outsideActivity;
               return (
               <tr
                 key={r.id}
-                title={healthTitle(r)}
-                className={`border-b border-black/5 transition last:border-0 dark:border-white/5 ${HEALTH_BG[h]}`}
+                title={flag ? "Touched by someone other than the rep — see Outside activity" : healthTitle(r)}
+                className={`border-b border-black/5 transition last:border-0 dark:border-white/5 ${
+                  flag
+                    ? "bg-corgi-ginger/[0.07] hover:bg-corgi-ginger/[0.13]"
+                    : HEALTH_BG[h]
+                }`}
               >
-                <td className={`border-l-[3px] px-4 py-3 font-medium ${HEALTH_EDGE[h]}`}>
-                  <a
-                    href={hubspotUrl(r)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline-offset-2 transition hover:text-corgi-ginger hover:underline"
-                  >
-                    {r.company}
-                  </a>
+                <td className={`border-l-[3px] px-4 py-3 font-medium ${flag ? "border-l-corgi-ginger" : HEALTH_EDGE[h]}`}>
+                  <span className="inline-flex items-center gap-2">
+                    {flag && (
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full bg-corgi-ginger"
+                        title="Touched by someone other than the rep"
+                      />
+                    )}
+                    <a
+                      href={hubspotUrl(r)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline-offset-2 transition hover:text-corgi-ginger hover:underline"
+                    >
+                      {r.company}
+                    </a>
+                  </span>
                 </td>
                 <td className="px-4 py-3">
                   <StageBadge stage={effectiveStage(r)} />
@@ -341,6 +475,19 @@ export default function ProspectsTable({
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
                   {r.lastContact ? (
                     prettyDate(r.lastContact)
+                  ) : (
+                    <span className="text-neutral-400">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {o ? (
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-medium text-corgi-ginger">
+                      {o.who ?? "Someone else"}
+                      <span className="font-normal text-neutral-400">·</span>
+                      <span className="font-normal text-neutral-500 dark:text-neutral-400">
+                        {shortDate(o.date)}
+                      </span>
+                    </span>
                   ) : (
                     <span className="text-neutral-400">—</span>
                   )}

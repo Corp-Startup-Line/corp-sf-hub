@@ -82,9 +82,11 @@ const DEAL_OVERRIDES: Record<string, { bdr: string; forceStage?: Stage }> = {
 // cached at build time.
 export const dynamic = "force-dynamic";
 // A cold pull (all team deals + their engagements) can take a while against
-// HubSpot's rate limits. Allow up to 60s so Vercel doesn't cut it off; after
-// the first pull the result is cached and responses are instant.
-export const maxDuration = 60;
+// HubSpot's rate limits. The engagement pass now also reads meetings, notes and
+// company-level activity to attribute "Last Rep Contact" to the right person, so
+// allow up to 120s so Vercel doesn't cut a cold pull off; after the first pull
+// the result is cached and responses are instant.
+export const maxDuration = 120;
 
 const HUBSPOT_BASE = "https://api.hubapi.com";
 
@@ -552,10 +554,22 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   // only for the deals we actually show, so a slow/failed enrichment never
   // blocks the deals themselves.
   const bdrOwnerIds = new Set(bdrIds); // our BDRs' HubSpot user ids
+  // Per deal, who is the deal's OWN rep (as a HubSpot user id)? We resolve each
+  // deal's canonical BDR name back to a user id via the case-insensitive owner
+  // map, so engagement attribution can tell "the rep did this" from "a teammate
+  // did this" — even for override deals whose HubSpot bdr field differs.
+  const repOwnerByDeal = new Map<string, string | undefined>();
+  for (const r of deduped) {
+    repOwnerByDeal.set(String(r.id), name2idLower.get(r.bdr.toLowerCase()));
+  }
   const engagements = await enrichEngagements(
     token,
     deduped.map((r) => String(r.id)),
-    (ownerId) => Boolean(ownerId) && bdrOwnerIds.has(ownerId!),
+    {
+      bdrOwnerIds,
+      repOwnerByDeal,
+      ownerName: (ownerId) => (ownerId ? id2name.get(ownerId) ?? null : null),
+    },
   );
   for (const r of deduped) {
     const e: Engagement | undefined = engagements.get(String(r.id));
@@ -568,20 +582,17 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   // the final rows.
   const owned = collapseCrossBdr(deduped);
 
-  // Fold the COMPANY's last-contacted date into "Last Rep Contact". Reps log a
-  // lot of email against the company record rather than the deal, so the deal's
-  // own notes_last_contacted can lag; here we show the newest of the deal date
-  // and the company's activity date (both plain "YYYY-MM-DD", so a string
-  // compare gives the later one). This runs AFTER ownership is resolved on
-  // purpose: the cross-BDR "who owns this company" decision above must keep using
-  // each deal's OWN signals, so pulling in the shared company date can never move
-  // a deal (or its money) to a different rep. It only ever pushes the displayed
-  // date forward — never backward, never null.
+  // Set the DISPLAYED "Last Rep Contact" to the rep's OWN activity (repLastContact
+  // from the engagements pass), and attach the "someone else touched it" alert.
+  // This runs AFTER ownership is resolved on purpose: the cross-BDR "who owns this
+  // company" decision above still uses each deal's original pre-collapse
+  // lastContact, so swapping the displayed value here can never move a deal (or
+  // its money) to a different rep. Floor with meetingDate (= the deal's create
+  // date) so the column is never blank when the rep has no logged activity yet.
   for (const r of owned) {
-    const companyDay = engagements.get(String(r.id))?.companyLastContact ?? null;
-    if (companyDay && (!r.lastContact || companyDay > r.lastContact)) {
-      r.lastContact = companyDay;
-    }
+    const e = engagements.get(String(r.id));
+    r.lastContact = e?.repLastContact ?? r.meetingDate;
+    r.outsideActivity = e?.outside ?? null;
   }
   return owned;
 }
@@ -604,7 +615,7 @@ export const getCachedProspects = unstable_cache(
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v15"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v16"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 
