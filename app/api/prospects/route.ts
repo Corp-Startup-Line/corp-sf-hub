@@ -12,7 +12,7 @@
 import { unstable_cache } from "next/cache";
 import type { Prospect, Stage } from "../../lib/data";
 import { enrichEngagements, type Engagement } from "./engagements";
-import { TEAM_BDRS, TEAM_AES } from "./team";
+import { TEAM_BDRS, TEAM_AES, CORP_TEAM_LOWER } from "./team";
 
 // Strip the noise so "Acme, Inc." and "Acme Inc" match: lower-case, drop
 // punctuation and common company suffixes, then collapse the spaces. Used to key
@@ -554,6 +554,13 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   // only for the deals we actually show, so a slow/failed enrichment never
   // blocks the deals themselves.
   const bdrOwnerIds = new Set(bdrIds); // our BDRs' HubSpot user ids
+  // Every corp colleague's HubSpot user id (the WHOLE company, not just SF).
+  // The "someone else touched it" alert ignores anyone in here — a corp teammate
+  // touching a deal is normal; only a genuinely outside-corp owner raises a flag.
+  const corpOwnerIds = new Set<string>();
+  for (const [nameLower, id] of name2idLower) {
+    if (CORP_TEAM_LOWER.has(nameLower)) corpOwnerIds.add(id);
+  }
   // Per deal, who is the deal's OWN rep (as a HubSpot user id)? We resolve each
   // deal's canonical BDR name back to a user id via the case-insensitive owner
   // map, so engagement attribution can tell "the rep did this" from "a teammate
@@ -573,6 +580,7 @@ async function loadProspects(token: string): Promise<Prospect[]> {
       bdrOwnerIds,
       repOwnerByDeal,
       aeOwnerByDeal,
+      corpOwnerIds,
       ownerName: (ownerId) => (ownerId ? id2name.get(ownerId) ?? null : null),
     },
   );
@@ -624,7 +632,7 @@ export const getCachedProspects = unstable_cache(
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v18"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v19"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 

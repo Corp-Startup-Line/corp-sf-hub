@@ -46,6 +46,66 @@ export const TEAM_AE_NAMES = [
   "Parker Horton",
 ] as const;
 
+// ============================================================================
+// THE FULL CORP ROSTER  —  everyone at the company, not just the SF sub-team
+// ----------------------------------------------------------------------------
+// The lists above are the SF BDR/AE sub-team (who gets a card on the dashboard).
+// This list is the WHOLE company: every colleague across every team. It powers
+// the "Needs your eyes" alert — a deal only needs your attention when someone
+// from OUTSIDE corp logged the newest activity. A fellow corp teammate touching
+// your deal (an AE, a manager, another BDR — anyone below) is normal internal
+// collaboration and is NOT flagged.
+//
+// Names must match HubSpot EXACTLY (matching is case-insensitive, but spelling
+// and spacing must line up, so a colleague's touches are correctly recognised as
+// internal). Add or remove people here as the company changes. If a real corp
+// colleague is ever missing, the only downside is their touch shows as an alert
+// (same as before) — it never hides a deal or changes any money figure.
+export const CORP_TEAM_NAMES = [
+  // SF BDRs / AEs (also listed above; repeated here so corp is self-contained)
+  "Carwyn Chiramel",
+  "Parker Horton",
+  "Kaya Roberts",
+  "Garrett Peterson",
+  "Jackson Lau",
+  "Andrew Bagasbas",
+  "Dino Citti",
+  "Broderick Cowan",
+  "Ethan Wilensky",
+  "Amos Book",
+  // Rest of corp (managers, leadership, and colleagues on other teams)
+  "Ethan Noonan",
+  "Gideon Dushku",
+  "Matthew Elmer",
+  "Andres Grijalva",
+  "Gavin Winchell",
+  "Connor White",
+  "Grace Ericksen",
+  "Patrick Gullixson",
+  "Jeanette Li",
+  "Samuel Noyce",
+  "Azriel Czerniak Linder",
+  "Jordan Leach",
+  "Drew Gordillo",
+  "Tucker Bean",
+  "Richard Hendharto",
+  "Jack Pustejovsky",
+  "Rylan Cole",
+  "Jose Duran",
+  "Alex Frankel",
+  "Michael Doane",
+  "James Elmer",
+  "Hunter Leija",
+  "Jed Clark",
+  "Anton Burton",
+  "Gunner Dohrenwend",
+] as const;
+
 // Fast lookups used by the server route (built from the lists above — don't edit).
 export const TEAM_BDRS = new Set<string>(TEAM_BDR_NAMES);
 export const TEAM_AES = new Set<string>(TEAM_AE_NAMES);
+// Lower-cased for case-insensitive matching (HubSpot casing is inconsistent —
+// e.g. some names come back all-lowercase — so we compare on lowercase).
+export const CORP_TEAM_LOWER = new Set<string>(
+  CORP_TEAM_NAMES.map((n) => n.toLowerCase()),
+);

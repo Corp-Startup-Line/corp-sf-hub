@@ -258,6 +258,9 @@ export type EnrichOptions = {
   bdrOwnerIds: Set<string>; // every rostered BDR's HubSpot user id (for lastBdrOutbound)
   repOwnerByDeal: Map<string, string | undefined>; // deal id → that deal's BDR user id
   aeOwnerByDeal: Map<string, string | undefined>; // deal id → that deal's AE user id
+  corpOwnerIds: Set<string>; // every corp colleague's user id — activity by anyone in
+  // here is internal and never counts as "outside activity" (only genuinely
+  // outside-corp owners raise the "someone else touched it" alert)
   ownerName: (ownerId: string | null | undefined) => string | null; // user id → display name
 };
 
@@ -276,7 +279,8 @@ export async function enrichEngagements(
   dealIds: string[],
   opts: EnrichOptions,
 ): Promise<Map<string, Engagement>> {
-  const { bdrOwnerIds, repOwnerByDeal, aeOwnerByDeal, ownerName } = opts;
+  const { bdrOwnerIds, repOwnerByDeal, aeOwnerByDeal, corpOwnerIds, ownerName } =
+    opts;
 
   // deal → its calls / meetings / notes (all associate directly to the deal),
   // deal → its contacts (emails hang off contacts), deal → its company.
@@ -419,6 +423,9 @@ export async function enrichEngagements(
         action: string,
       ) => {
         if (!ts || !refOwner || !ownerId || ownerId === refOwner) return;
+        // A corp colleague touching the deal is normal internal collaboration —
+        // never an alert. Only someone from OUTSIDE corp raises "needs your eyes".
+        if (corpOwnerIds.has(ownerId)) return;
         const tms = new Date(ts).getTime();
         if (!Number.isFinite(tms)) return;
         if (!acc.best || tms > acc.best.tms) {
