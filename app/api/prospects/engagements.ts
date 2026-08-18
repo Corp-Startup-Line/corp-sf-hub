@@ -216,6 +216,16 @@ function toDay(iso: string | null): string | null {
   return iso ? iso.slice(0, 10) : null;
 }
 
+// A "last contact" can never be in the future: a meeting or call scheduled for a
+// later date hasn't happened yet, so it must not count as the rep's most recent
+// touch (otherwise "Last Rep Contact" shows dates weeks ahead of today). This
+// guard applies ONLY to the rep's own last-contact — the outside-activity alert
+// still intentionally surfaces future-booked meetings, and lastInbound /
+// lastBdrOutbound are left untouched (cross-BDR ownership depends on them).
+function notFuture(ts: string): boolean {
+  return new Date(ts).getTime() <= Date.now();
+}
+
 // A single activity by someone OTHER than the deal's own rep — used to alert the
 // rep that a teammate (usually the AE) touched their deal. `who` is the person's
 // name when HubSpot records an owner (calls/meetings/notes always do; emails
@@ -423,24 +433,27 @@ export async function enrichEngagements(
         const ts = p?.hs_timestamp ?? null;
         if (!ts) continue;
         const owner = p?.hubspot_owner_id ?? null;
-        if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
-        else pushOutside(ts, owner, "logged a call");
+        if (ownedByRep(owner)) {
+          if (notFuture(ts)) repLast = laterIso(repLast, ts);
+        } else pushOutside(ts, owner, "logged a call");
       }
       for (const mId of meetingsOf(dealId)) {
         const p = meetingProps.get(mId);
         const ts = p?.hs_timestamp ?? null;
         if (!ts) continue;
         const owner = p?.hubspot_owner_id ?? null;
-        if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
-        else pushOutside(ts, owner, "logged a meeting");
+        if (ownedByRep(owner)) {
+          if (notFuture(ts)) repLast = laterIso(repLast, ts);
+        } else pushOutside(ts, owner, "logged a meeting");
       }
       for (const nId of notesOf(dealId)) {
         const p = noteProps.get(nId);
         const ts = p?.hs_timestamp ?? null;
         if (!ts) continue;
         const owner = p?.hubspot_owner_id ?? null;
-        if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
-        else pushOutside(ts, owner, "added a note");
+        if (ownedByRep(owner)) {
+          if (notFuture(ts)) repLast = laterIso(repLast, ts);
+        } else pushOutside(ts, owner, "added a note");
       }
       for (const eId of emailsOf(dealId)) {
         const p = emailProps.get(eId);
@@ -453,7 +466,7 @@ export async function enrichEngagements(
         // rep's own → the rep's activity (email owner is usually blank here).
         if (owner && refOwner && owner !== refOwner) {
           pushOutside(ts, owner, "sent an email");
-        } else {
+        } else if (notFuture(ts)) {
           repLast = laterIso(repLast, ts);
         }
       }
