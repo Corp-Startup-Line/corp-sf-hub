@@ -231,17 +231,23 @@ export type Engagement = {
   // direction) or an incoming email from the customer's contacts
   lastBdrOutbound: string | null; // last outbound call attempt by one of our BDRs
   repLastContact: string | null; // newest activity attributable to THIS deal's OWN
-  // rep, across the deal, its contacts, and its company (calls/meetings/notes the
-  // rep owns, plus outgoing emails). This is the real "Last Rep Contact".
-  outside: OutsideActivity | null; // newest activity NOT attributable to the rep
-  // (a teammate logging a call/email/meeting/note on the rep's deal)
+  // BDR, across the deal, its contacts, and its company (calls/meetings/notes the
+  // BDR owns, plus outgoing emails). This is the BDR-relative "Last Rep Contact".
+  outside: OutsideActivity | null; // newest activity NOT attributable to the BDR
+  // (a teammate — usually the AE — logging a call/email/meeting/note on the deal)
+  aeLastContact: string | null; // same, but relative to the deal's AE — the newest
+  // activity the AE themselves logged (used in the AE view, where "you" = the AE)
+  aeOutside: OutsideActivity | null; // newest activity NOT by the AE (the BDR or
+  // another teammate touching the AE's deal) — the AE-view "someone else" alert
 };
 
-// Options describing, per deal, who the deal's own rep is — so we can split every
-// activity into "the rep did this" vs "someone else did this".
+// Options describing, per deal, who the deal's own reps are — so we can split every
+// activity into "the rep did this" vs "someone else did this", once relative to the
+// BDR and once relative to the AE.
 export type EnrichOptions = {
   bdrOwnerIds: Set<string>; // every rostered BDR's HubSpot user id (for lastBdrOutbound)
-  repOwnerByDeal: Map<string, string | undefined>; // deal id → that deal's own rep's user id
+  repOwnerByDeal: Map<string, string | undefined>; // deal id → that deal's BDR user id
+  aeOwnerByDeal: Map<string, string | undefined>; // deal id → that deal's AE user id
   ownerName: (ownerId: string | null | undefined) => string | null; // user id → display name
 };
 
@@ -260,7 +266,7 @@ export async function enrichEngagements(
   dealIds: string[],
   opts: EnrichOptions,
 ): Promise<Map<string, Engagement>> {
-  const { bdrOwnerIds, repOwnerByDeal, ownerName } = opts;
+  const { bdrOwnerIds, repOwnerByDeal, aeOwnerByDeal, ownerName } = opts;
 
   // deal → its calls / meetings / notes (all associate directly to the deal),
   // deal → its contacts (emails hang off contacts), deal → its company.
@@ -386,81 +392,94 @@ export async function enrichEngagements(
     }
 
     // repLastContact / outside: split every activity on the deal (and its
-    // company/contacts) into "the rep did it" vs "a teammate did it".
-    const repOwner = repOwnerByDeal.get(dealId); // may be undefined if unresolved
-    let repLast: string | null = null;
+    // company/contacts) into "the rep did it" vs "a teammate did it". We run this
+    // split twice — once with the BDR as the reference rep (for the BDR view) and
+    // once with the AE (for the AE view) — so "you" always means the rep in focus.
     type OutsideAcc = { ts: string; tms: number; who: string | null; action: string };
-    // Held in an object so TypeScript keeps the union type across the closure
-    // that mutates it (a bare `let` would get narrowed to null).
-    const acc: { best: OutsideAcc | null } = { best: null };
-    // A teammate activity: only counted when we actually know the deal's rep (so
-    // we can be sure it wasn't them). Keeps the newest such activity.
-    const pushOutside = (
-      ts: string | null | undefined,
-      ownerId: string | null | undefined,
-      action: string,
-    ) => {
-      if (!ts || !repOwner || !ownerId || ownerId === repOwner) return;
-      const tms = new Date(ts).getTime();
-      if (!Number.isFinite(tms)) return;
-      if (!acc.best || tms > acc.best.tms) {
-        acc.best = { ts, tms, who: ownerName(ownerId), action };
-      }
-    };
-    const ownedByRep = (ownerId: string | null | undefined) =>
-      Boolean(repOwner) && ownerId === repOwner;
+    const attribute = (refOwner: string | undefined) => {
+      let repLast: string | null = null;
+      // Held in an object so TypeScript keeps the union type across the closure
+      // that mutates it (a bare `let` would get narrowed to null).
+      const acc: { best: OutsideAcc | null } = { best: null };
+      // A teammate activity: only counted when we actually know the reference rep
+      // (so we can be sure it wasn't them). Keeps the newest such activity.
+      const pushOutside = (
+        ts: string | null | undefined,
+        ownerId: string | null | undefined,
+        action: string,
+      ) => {
+        if (!ts || !refOwner || !ownerId || ownerId === refOwner) return;
+        const tms = new Date(ts).getTime();
+        if (!Number.isFinite(tms)) return;
+        if (!acc.best || tms > acc.best.tms) {
+          acc.best = { ts, tms, who: ownerName(ownerId), action };
+        }
+      };
+      const ownedByRep = (ownerId: string | null | undefined) =>
+        Boolean(refOwner) && ownerId === refOwner;
 
-    for (const callId of callsOf(dealId)) {
-      const p = callProps.get(callId);
-      const ts = p?.hs_timestamp ?? null;
-      if (!ts) continue;
-      const owner = p?.hubspot_owner_id ?? null;
-      if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
-      else pushOutside(ts, owner, "logged a call");
-    }
-    for (const mId of meetingsOf(dealId)) {
-      const p = meetingProps.get(mId);
-      const ts = p?.hs_timestamp ?? null;
-      if (!ts) continue;
-      const owner = p?.hubspot_owner_id ?? null;
-      if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
-      else pushOutside(ts, owner, "logged a meeting");
-    }
-    for (const nId of notesOf(dealId)) {
-      const p = noteProps.get(nId);
-      const ts = p?.hs_timestamp ?? null;
-      if (!ts) continue;
-      const owner = p?.hubspot_owner_id ?? null;
-      if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
-      else pushOutside(ts, owner, "added a note");
-    }
-    for (const eId of emailsOf(dealId)) {
-      const p = emailProps.get(eId);
-      const ts = p?.hs_timestamp ?? null;
-      if (!ts) continue;
-      // Customer inbound email is never OUR activity — skip entirely.
-      if (p?.hs_email_direction === "INCOMING_EMAIL") continue;
-      const owner = p?.hubspot_owner_id ?? null;
-      // Outgoing email owned by another teammate → outside; owner-less or the
-      // rep's own → the rep's activity (email owner is usually blank here).
-      if (owner && repOwner && owner !== repOwner) {
-        pushOutside(ts, owner, "sent an email");
-      } else {
-        repLast = laterIso(repLast, ts);
+      for (const callId of callsOf(dealId)) {
+        const p = callProps.get(callId);
+        const ts = p?.hs_timestamp ?? null;
+        if (!ts) continue;
+        const owner = p?.hubspot_owner_id ?? null;
+        if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
+        else pushOutside(ts, owner, "logged a call");
       }
-    }
+      for (const mId of meetingsOf(dealId)) {
+        const p = meetingProps.get(mId);
+        const ts = p?.hs_timestamp ?? null;
+        if (!ts) continue;
+        const owner = p?.hubspot_owner_id ?? null;
+        if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
+        else pushOutside(ts, owner, "logged a meeting");
+      }
+      for (const nId of notesOf(dealId)) {
+        const p = noteProps.get(nId);
+        const ts = p?.hs_timestamp ?? null;
+        if (!ts) continue;
+        const owner = p?.hubspot_owner_id ?? null;
+        if (ownedByRep(owner)) repLast = laterIso(repLast, ts);
+        else pushOutside(ts, owner, "added a note");
+      }
+      for (const eId of emailsOf(dealId)) {
+        const p = emailProps.get(eId);
+        const ts = p?.hs_timestamp ?? null;
+        if (!ts) continue;
+        // Customer inbound email is never OUR activity — skip entirely.
+        if (p?.hs_email_direction === "INCOMING_EMAIL") continue;
+        const owner = p?.hubspot_owner_id ?? null;
+        // Outgoing email owned by another teammate → outside; owner-less or the
+        // rep's own → the rep's activity (email owner is usually blank here).
+        if (owner && refOwner && owner !== refOwner) {
+          pushOutside(ts, owner, "sent an email");
+        } else {
+          repLast = laterIso(repLast, ts);
+        }
+      }
+
+      return {
+        repLastContact: toDay(repLast),
+        outside: acc.best
+          ? {
+              date: toDay(acc.best.ts) as string,
+              who: acc.best.who,
+              action: acc.best.action,
+            }
+          : null,
+      };
+    };
+
+    const bdrAttr = attribute(repOwnerByDeal.get(dealId));
+    const aeAttr = attribute(aeOwnerByDeal.get(dealId));
 
     out.set(dealId, {
       lastInbound: toDay(lastInbound),
       lastBdrOutbound: toDay(lastBdrOutbound),
-      repLastContact: toDay(repLast),
-      outside: acc.best
-        ? {
-            date: toDay(acc.best.ts) as string,
-            who: acc.best.who,
-            action: acc.best.action,
-          }
-        : null,
+      repLastContact: bdrAttr.repLastContact,
+      outside: bdrAttr.outside,
+      aeLastContact: aeAttr.repLastContact,
+      aeOutside: aeAttr.outside,
     });
   }
   return out;

@@ -126,6 +126,16 @@ export type Prospect = {
     who: string | null; // teammate's name, or null = "someone else"
     action: string;     // "logged a call" / "sent an email" / "logged a meeting" / "added a note"
   } | null;
+  // AE-relative versions of the two fields above: "Last Rep Contact" and the
+  // "someone else touched it" alert computed with the AE (not the BDR) as "you".
+  // The AE view swaps to these so a card never flags the AE's own activity as
+  // outside. Same shape; undefined/null when there's no AE-attributable activity.
+  lastContactAe?: string | null;
+  outsideActivityAe?: {
+    date: string;
+    who: string | null;
+    action: string;
+  } | null;
   // ---- Extra fields the Corp SF Metrics page reads (attached by the server) ---
   // So Metrics can bucket a won deal into the right week and split it
   // inbound/outbound off the SAME rows Pipeline uses. Undefined on sample rows.

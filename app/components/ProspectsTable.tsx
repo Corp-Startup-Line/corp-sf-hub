@@ -64,14 +64,26 @@ const LEGEND: { health: DealHealth; label: string }[] = [
   { health: "won", label: "Won" },
 ];
 
+// Which rep is "you" depends on the view. In a BDR view "you" = the BDR, so we
+// use the BDR-relative signals; in an AE view "you" = the AE, so we swap to the
+// AE-relative ones the backend computes alongside them. These two pickers keep
+// the rest of the table view-agnostic — pass `aeView` and get the right field.
+function outsideOf(r: Prospect, aeView: boolean) {
+  return aeView ? r.outsideActivityAe ?? null : r.outsideActivity ?? null;
+}
+function repContactOf(r: Prospect, aeView: boolean): string | null {
+  return (aeView ? r.lastContactAe : r.lastContact) ?? null;
+}
+
 // "Touched by others" — a deal is FLAGGED when its newest activity was logged by
-// someone OTHER than the deal's own rep, AFTER the rep last touched it. The
-// backend hands us `outsideActivity` (the newest non-rep activity, with who/when/
-// action); we flag the row when that outside touch is newer than the rep's own
-// last contact. Dates are "YYYY-MM-DD" strings, so a plain string compare works.
-export function isFlagged(r: Prospect): boolean {
-  const o = r.outsideActivity;
-  return Boolean(o && o.date > (r.lastContact ?? ""));
+// someone OTHER than the rep in focus, AFTER that rep last touched it. The
+// backend hands us the "outside" activity (the newest non-rep activity, with
+// who/when/action) both BDR-relative and AE-relative; we pick the one matching
+// the current view and flag the row when that outside touch is newer than the
+// rep's own last contact. Dates are "YYYY-MM-DD" strings, so a string compare works.
+export function isFlagged(r: Prospect, aeView: boolean): boolean {
+  const o = outsideOf(r, aeView);
+  return Boolean(o && o.date > (repContactOf(r, aeView) ?? ""));
 }
 
 // "2026-08-15" -> "Aug 15" — the compact form used in the flag column and the
@@ -130,6 +142,7 @@ export default function ProspectsTable({
   stageFilter,
   onStageFilter,
   singleRep,
+  aeView,
 }: {
   rows: Prospect[];
   wonOnly: boolean;
@@ -140,6 +153,11 @@ export default function ProspectsTable({
   // personal to-do — it only makes sense for a single rep — so it's hidden on
   // the aggregate main page and shown only inside a BDR or AE view.
   singleRep: boolean;
+  // True when the current view is an AE view (an AE is selected). Flips every
+  // "you"-relative signal — Last Rep Contact, the outside-activity flag, and the
+  // strip — from the deal's BDR to its AE, so an AE never sees their own activity
+  // flagged as "someone else touched it".
+  aeView: boolean;
 }) {
   const [search, setSearch] = useState("");
   // A month filter LOCAL to this table (like the search box), so you can narrow
@@ -220,19 +238,19 @@ export default function ProspectsTable({
   const flagged = useMemo(
     () =>
       filtered
-        .filter(isFlagged)
+        .filter((r) => isFlagged(r, aeView))
         .sort((a, b) =>
-          (b.outsideActivity?.date ?? "").localeCompare(
-            a.outsideActivity?.date ?? "",
+          (outsideOf(b, aeView)?.date ?? "").localeCompare(
+            outsideOf(a, aeView)?.date ?? "",
           ),
         ),
-    [filtered],
+    [filtered, aeView],
   );
 
   // The table: apply the "touched by others" pill on top of the shared set, then
   // sort. useMemo = only recompute when inputs change.
   const processed = useMemo(() => {
-    const out = touchedByOthers ? filtered.filter(isFlagged) : filtered;
+    const out = touchedByOthers ? filtered.filter((r) => isFlagged(r, aeView)) : filtered;
     const sorted = [...out].sort((a, b) => {
       // The "Quote" column shows the deal's Corgi value (dealValue), so sort by
       // that same figure rather than the raw HubSpot amount.
@@ -255,7 +273,7 @@ export default function ProspectsTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [filtered, touchedByOthers, sortKey, sortDir]);
+  }, [filtered, touchedByOthers, aeView, sortKey, sortDir]);
 
   // Pagination maths.
   const totalPages = Math.max(1, Math.ceil(processed.length / pageSize));
@@ -288,7 +306,7 @@ export default function ProspectsTable({
           </div>
           <div className="flex gap-3 overflow-x-auto pb-1">
             {flagged.map((r) => {
-              const o = r.outsideActivity!;
+              const o = outsideOf(r, aeView)!;
               return (
                 <a
                   key={r.id}
@@ -302,7 +320,7 @@ export default function ProspectsTable({
                     {r.company}
                   </span>
                   <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                    You last touched {shortDate(r.lastContact)}
+                    You last touched {shortDate(repContactOf(r, aeView))}
                   </span>
                   <span className="text-xs font-medium text-corgi-ginger">
                     {o.who ?? "Someone else"} {o.action} {shortDate(o.date)}
@@ -437,8 +455,9 @@ export default function ProspectsTable({
               // warm ginger treatment — ginger tint + ginger left-edge + a ginger
               // dot beside the company — overriding the health colours so the
               // alert reads at a glance.
-              const flag = isFlagged(r);
-              const o = r.outsideActivity;
+              const flag = isFlagged(r, aeView);
+              const o = outsideOf(r, aeView);
+              const repContact = repContactOf(r, aeView);
               return (
               <tr
                 key={r.id}
@@ -487,8 +506,8 @@ export default function ProspectsTable({
                   )}
                 </td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
-                  {r.lastContact ? (
-                    prettyDate(r.lastContact)
+                  {repContact ? (
+                    prettyDate(repContact)
                   ) : (
                     <span className="text-neutral-400">—</span>
                   )}

@@ -217,6 +217,7 @@ export default function Dashboard() {
             stageFilter={stageFilter}
             onStageFilter={selectStage}
             singleRep={singleRep}
+            aeView={filters.ae !== "all"}
           />
         </>
       )}

@@ -559,8 +559,12 @@ async function loadProspects(token: string): Promise<Prospect[]> {
   // map, so engagement attribution can tell "the rep did this" from "a teammate
   // did this" — even for override deals whose HubSpot bdr field differs.
   const repOwnerByDeal = new Map<string, string | undefined>();
+  // Same, but the deal's AE — so engagement attribution can also be computed
+  // relative to the AE (used by the AE view, where "you" = the AE, not the BDR).
+  const aeOwnerByDeal = new Map<string, string | undefined>();
   for (const r of deduped) {
     repOwnerByDeal.set(String(r.id), name2idLower.get(r.bdr.toLowerCase()));
+    aeOwnerByDeal.set(String(r.id), name2idLower.get(r.ae.toLowerCase()));
   }
   const engagements = await enrichEngagements(
     token,
@@ -568,6 +572,7 @@ async function loadProspects(token: string): Promise<Prospect[]> {
     {
       bdrOwnerIds,
       repOwnerByDeal,
+      aeOwnerByDeal,
       ownerName: (ownerId) => (ownerId ? id2name.get(ownerId) ?? null : null),
     },
   );
@@ -593,6 +598,10 @@ async function loadProspects(token: string): Promise<Prospect[]> {
     const e = engagements.get(String(r.id));
     r.lastContact = e?.repLastContact ?? r.meetingDate;
     r.outsideActivity = e?.outside ?? null;
+    // AE-relative versions of the same two signals (the AE view swaps to these so
+    // "you" means the AE). Same post-collapse safety: display-only, never moves money.
+    r.lastContactAe = e?.aeLastContact ?? r.meetingDate;
+    r.outsideActivityAe = e?.aeOutside ?? null;
   }
   return owned;
 }
@@ -615,7 +624,7 @@ export const getCachedProspects = unstable_cache(
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v16"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v17"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 
