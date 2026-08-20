@@ -70,12 +70,16 @@ export default function Dashboard() {
   // new teammates appear immediately instead of only after their first deal.
   const [rosterBdrs, setRosterBdrs] = useState<string[]>([]);
   const [rosterAes, setRosterAes] = useState<string[]>([]);
+  // Former BDRs: their deals still count in the totals, but they're hidden from
+  // the BDR filter so they don't show as an active, selectable rep.
+  const [hiddenBdrs, setHiddenBdrs] = useState<string[]>([]);
   useEffect(() => {
     let alive = true;
     getRoster().then((r) => {
       if (!alive || !r) return;
       setRosterBdrs(r.bdrs);
       setRosterAes(r.aes);
+      setHiddenBdrs(r.hiddenBdrs);
     });
     return () => {
       alive = false;
@@ -85,17 +89,16 @@ export default function Dashboard() {
   // The BDR list = everyone on the official roster PLUS anyone who has deals but
   // somehow isn't on the roster (belt-and-suspenders), so the dashboard always
   // shows all teammates and never silently drops someone who has real deals.
-  const dataBdrs = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [...rosterBdrs, ...allRows.map((r) => r.bdr)].filter(
-            (b) => b && b !== "Unassigned",
-          ),
+  const dataBdrs = useMemo(() => {
+    const hidden = new Set(hiddenBdrs.map((n) => n.toLowerCase()));
+    return Array.from(
+      new Set(
+        [...rosterBdrs, ...allRows.map((r) => r.bdr)].filter(
+          (b) => b && b !== "Unassigned" && !hidden.has(b.toLowerCase()),
         ),
-      ).sort(),
-    [allRows, rosterBdrs],
-  );
+      ),
+    ).sort();
+  }, [allRows, rosterBdrs, hiddenBdrs]);
 
   // The month dropdown is built from the months that actually have deals, so
   // new months (July, August, …) appear on their own — nothing is hardcoded.

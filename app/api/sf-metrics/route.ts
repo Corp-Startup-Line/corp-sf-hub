@@ -27,7 +27,8 @@ const DEFAULT_REPS =
   "carwyn@corgi.insure,kaya@corgi.insure,andrew@corgi.insure,amos@corgi.insure," +
   "parker@trycorgi.com,jackson@trycorgi.com,broderick@trycorgi.com," +
   "richard@corgi.insure,dino@corgi.insure,garrett.peterson@corgi.insure," +
-  "ethan.w@trycorgi.com,jeanette@trycorgi.com,humbert@corgi.com";
+  "ethan.w@trycorgi.com,jeanette@trycorgi.com,humbert@corgi.com," +
+  "patrick@corgi.com,gabriel@corgi.com,hsuan@corgi.com";
 const REPS = (process.env.SF_REPS || DEFAULT_REPS)
   .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 // Names (or fragments) to drop from the BDR section only — AMs / pure AEs who sit
@@ -35,7 +36,9 @@ const REPS = (process.env.SF_REPS || DEFAULT_REPS)
 // they're excluded here so they no longer appear on the BDR leaderboard, but they
 // still show on the AE side (they own deals) and every deal they sourced is still
 // pulled — this only hides their BDR row, it changes no money totals.
-const BDR_EXCLUDE = (process.env.BDR_EXCLUDE || "humbert,richard,jeanette,kaya,parker,amos")
+// Broderick added 2026-08-20: left the BDR seat, but his past Closed-Won deals must
+// still count for the team, so he's hidden from the leaderboard here (not dropped).
+const BDR_EXCLUDE = (process.env.BDR_EXCLUDE || "humbert,richard,jeanette,kaya,parker,amos,broderick")
   .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 const WEEKS = +(process.env.TREND_WEEKS || 15);
 const CACHE_MS = +(process.env.CACHE_MIN || 10) * 60000;

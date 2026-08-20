@@ -7,7 +7,7 @@
 // no deal data. It's tiny and changes rarely, so it's cheap to fetch.
 // ============================================================================
 
-import { TEAM_BDR_NAMES, TEAM_AE_NAMES } from "../prospects/team";
+import { TEAM_BDR_NAMES, TEAM_AE_NAMES, HIDDEN_BDR_NAMES } from "../prospects/team";
 
 export const dynamic = "force-static";
 
@@ -15,5 +15,8 @@ export async function GET() {
   return Response.json({
     bdrs: [...TEAM_BDR_NAMES],
     aes: [...TEAM_AE_NAMES],
+    // Former BDRs: their deals still count for the team, but they should not show
+    // as a selectable rep in the BDR filter (see Dashboard.tsx).
+    hiddenBdrs: [...HIDDEN_BDR_NAMES],
   });
 }

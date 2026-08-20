@@ -27,6 +27,7 @@ export const TEAM_BDR_NAMES = [
   "Carwyn Chiramel",
   "Garrett Peterson",
   "Jackson Lau",
+  "Broderick Cowan",
   "Ethan Wilensky",
   "Parker Horton",
   "Amos Book",
@@ -34,6 +35,18 @@ export const TEAM_BDR_NAMES = [
   "Gabriel Perez",
   "Shen Shen",
 ] as const;
+
+// FORMER BDRs — people who have LEFT the BDR seat but whose past Closed-Won deals
+// must STILL count toward the team's revenue. They stay in TEAM_BDR_NAMES above so
+// their deals keep getting pulled (and keep counting in the team total), but they
+// are hidden from the BDR filter/leaderboard so they don't show as an active rep.
+// (On the Metrics dashboard the same hide is done via BDR_EXCLUDE in sf-metrics.)
+export const HIDDEN_BDR_NAMES = [
+  "Broderick Cowan",
+] as const;
+export const HIDDEN_BDRS_LOWER = new Set<string>(
+  HIDDEN_BDR_NAMES.map((n) => n.toLowerCase()),
+);
 
 // YOUR AEs — a deal's "owner" in HubSpot is the AE. Only these people are corp
 // AEs; any other owner (including BDRs who happen to own a deal) is shown as

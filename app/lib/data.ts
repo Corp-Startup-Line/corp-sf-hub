@@ -226,7 +226,7 @@ export async function getProspects(): Promise<Prospect[]> {
 // The official team roster (from the server's team.ts). We fetch this separately
 // from the deals so the dashboard can show EVERY teammate — including anyone with
 // 0 deals yet, like a rep you just added. It's a tiny list of names, so it's cheap.
-export type Roster = { bdrs: string[]; aes: string[] };
+export type Roster = { bdrs: string[]; aes: string[]; hiddenBdrs: string[] };
 
 export async function getRoster(): Promise<Roster | null> {
   try {
@@ -234,7 +234,11 @@ export async function getRoster(): Promise<Roster | null> {
     if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data?.bdrs) && Array.isArray(data?.aes)) {
-      return { bdrs: data.bdrs as string[], aes: data.aes as string[] };
+      return {
+        bdrs: data.bdrs as string[],
+        aes: data.aes as string[],
+        hiddenBdrs: Array.isArray(data?.hiddenBdrs) ? (data.hiddenBdrs as string[]) : [],
+      };
     }
     return null;
   } catch {
