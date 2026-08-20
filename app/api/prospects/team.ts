@@ -31,6 +31,9 @@ export const TEAM_BDR_NAMES = [
   "Ethan Wilensky",
   "Parker Horton",
   "Amos Book",
+  "Patrick Gullixson",
+  "Gabriel Perez",
+  "Shen Shen",
 ] as const;
 
 // YOUR AEs — a deal's "owner" in HubSpot is the AE. Only these people are corp
@@ -99,6 +102,8 @@ export const CORP_TEAM_NAMES = [
   "Jed Clark",
   "Anton Burton",
   "Gunner Dohrenwend",
+  "Gabriel Perez",
+  "Shen Shen",
 ] as const;
 
 // Fast lookups used by the server route (built from the lists above — don't edit).
