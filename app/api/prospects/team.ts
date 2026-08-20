@@ -27,7 +27,6 @@ export const TEAM_BDR_NAMES = [
   "Carwyn Chiramel",
   "Garrett Peterson",
   "Jackson Lau",
-  "Broderick Cowan",
   "Ethan Wilensky",
   "Parker Horton",
   "Amos Book",
