@@ -513,12 +513,16 @@ export default function ProspectsTable({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {o ? (
+                  {/* Only show an outside touch when it happened AFTER the corp
+                      rep's last contact (i.e. the row is flagged) — that's the
+                      whole point of the alert. An older outside touch is stale
+                      and shows as "—". */}
+                  {flag ? (
                     <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-medium text-corgi-ginger">
-                      {o.who ?? "Someone else"}
+                      {o!.who ?? "Someone else"}
                       <span className="font-normal text-neutral-400">·</span>
                       <span className="font-normal text-neutral-500 dark:text-neutral-400">
-                        {shortDate(o.date)}
+                        {shortDate(o!.date)}
                       </span>
                     </span>
                   ) : (
