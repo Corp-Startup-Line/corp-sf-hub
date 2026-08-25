@@ -120,7 +120,6 @@ export function ProgressBar({ pct }: { pct: number }) {
 // ---- Coloured badge for a deal's stage -----------------------------------
 const STAGE_STYLES: Record<Stage, string> = {
   "Closed Won": "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  Ghosting: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
   Qualified: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
   Quoted: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   "Meeting Booked": "bg-violet-500/15 text-violet-600 dark:text-violet-400",

@@ -51,14 +51,13 @@ export function KpiStrip({ kpis }: { kpis: Kpis }) {
 
 // Each funnel stage gets its own hue so the pipeline reads as a gradient of
 // steps, not a wall of one colour. Colours match the stage badges elsewhere:
-// ginger (all) → violet → sky → amber → emerald (won) → rose (ghosting).
+// ginger (all) → violet → sky → amber → emerald (won) → slate (closed lost).
 const FUNNEL_TONE: Record<Stage | "all", { num: string; bar: string; tint: TintName }> = {
   all: { num: "text-corgi-ginger", bar: "bg-corgi-ginger", tint: "ginger" },
   "Meeting Booked": { num: "text-violet-600 dark:text-violet-400", bar: "bg-violet-500", tint: "violet" },
   Qualified: { num: "text-sky-600 dark:text-sky-400", bar: "bg-sky-500", tint: "sky" },
   Quoted: { num: "text-amber-600 dark:text-amber-400", bar: "bg-amber-500", tint: "amber" },
   "Closed Won": { num: "text-emerald-600 dark:text-emerald-400", bar: "bg-emerald-500", tint: "emerald" },
-  Ghosting: { num: "text-rose-600 dark:text-rose-400", bar: "bg-rose-500", tint: "rose" },
   "Closed Lost": { num: "text-slate-600 dark:text-slate-400", bar: "bg-slate-500", tint: "slate" },
 };
 

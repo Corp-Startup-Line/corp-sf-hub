@@ -17,7 +17,6 @@ export const STAGES = [
   "Qualified",
   "Quoted",
   "Closed Won",
-  "Ghosting",
   "Closed Lost",
 ] as const;
 
@@ -164,13 +163,13 @@ const PROSPECTS: Prospect[] = [
   { id: 1,  company: "Northwind Traders",   stage: "Closed Won",    bdr: "Jed",     ae: "Gavin Winchell",  contact: "Priya Shah",     meetingDate: "2026-01-08", quote: 48000, notes: "Signed annual contract", month: "2026-01", confirmed: true,  lastContact: "2026-01-10" },
   { id: 2,  company: "Blue Yonder Airlines", stage: "Quoted",       bdr: "Oz",      ae: "Garrett Martell", contact: "Tom Reyes",      meetingDate: "2026-01-14", quote: 32000, notes: "Awaiting procurement sign-off", month: "2026-01", confirmed: false, lastContact: "2026-06-16" },
   { id: 3,  company: "Contoso Ltd",          stage: "Qualified",    bdr: "Ben",     ae: "Tor Gordon",      contact: "Maria Lind",     meetingDate: "2026-01-19", quote: 21000, notes: "Budget confirmed for Q2", month: "2026-01", confirmed: false, lastContact: "2026-06-10" },
-  { id: 4,  company: "Fabrikam Inc",         stage: "Ghosting",     bdr: "Daryl",   ae: "Alex Frankel",    contact: "Nate Okafor",    meetingDate: "2026-01-22", quote: 15000, notes: "No reply in 3 weeks", month: "2026-01", confirmed: false, lastContact: "2026-01-22" },
+  { id: 4,  company: "Fabrikam Inc",         stage: "Closed Lost",     bdr: "Daryl",   ae: "Alex Frankel",    contact: "Nate Okafor",    meetingDate: "2026-01-22", quote: 15000, notes: "No reply in 3 weeks", month: "2026-01", confirmed: false, lastContact: "2026-01-22" },
   { id: 5,  company: "Adventure Works",      stage: "Closed Won",   bdr: "Gabriel", ae: "Matt Elmer",      contact: "Sofia Bruno",    meetingDate: "2026-01-27", quote: 61000, notes: "Expansion upsell included", month: "2026-01", confirmed: true,  lastContact: "2026-01-27" },
   { id: 6,  company: "Tailspin Toys",        stage: "Meeting Booked", bdr: "Carwyn", ae: "Andrew Gordillo", contact: "Leo Vance",     meetingDate: "2026-02-03", quote: 18000, notes: "Discovery call scheduled", month: "2026-02", confirmed: false, lastContact: "2026-06-17" },
   { id: 7,  company: "Wingtip Ltd",          stage: "Qualified",    bdr: "Luke",    ae: "Sam Noyce",       contact: "Hana Ito",       meetingDate: "2026-02-05", quote: 27000, notes: "Technical fit confirmed", month: "2026-02", confirmed: false, lastContact: "2026-06-09" },
   { id: 8,  company: "Proseware Group",      stage: "Quoted",       bdr: "Dino",    ae: "Gavin Winchell",  contact: "Owen Blake",     meetingDate: "2026-02-09", quote: 44000, notes: "Quote sent, chasing", month: "2026-02", confirmed: false, lastContact: "2026-06-15" },
   { id: 9,  company: "Litware Holdings",     stage: "Closed Won",   bdr: "Andrew",  ae: "Garrett Martell", contact: "Ines Marsh",     meetingDate: "2026-02-12", quote: 53000, notes: "Multi-year deal", month: "2026-02", confirmed: true,  lastContact: "2026-02-12" },
-  { id: 11, company: "Graphic Design Inst",  stage: "Ghosting",     bdr: "Parker",  ae: "Alex Frankel",    contact: "Elena Frost",    meetingDate: "2026-02-18", quote: 9000,  notes: "Went dark after demo", month: "2026-02", confirmed: false, lastContact: "2026-02-18" },
+  { id: 11, company: "Graphic Design Inst",  stage: "Closed Lost",     bdr: "Parker",  ae: "Alex Frankel",    contact: "Elena Frost",    meetingDate: "2026-02-18", quote: 9000,  notes: "Went dark after demo", month: "2026-02", confirmed: false, lastContact: "2026-02-18" },
   { id: 12, company: "Coho Vineyard",        stage: "Qualified",    bdr: "Amos",    ae: "Matt Elmer",      contact: "Diego Sol",      meetingDate: "2026-02-21", quote: 30000, notes: "Champion identified", month: "2026-02", confirmed: false, lastContact: "2026-06-16" },
   { id: 13, company: "Alpine Ski House",     stage: "Closed Won",   bdr: "Jed",     ae: "Andrew Gordillo", contact: "Mila Frost",     meetingDate: "2026-03-02", quote: 72000, notes: "Flagship logo win", month: "2026-03", confirmed: true,  lastContact: "2026-03-02" },
   { id: 14, company: "Margie's Travel",      stage: "Quoted",       bdr: "Oz",      ae: "Sam Noyce",       contact: "Ken Amari",      meetingDate: "2026-03-06", quote: 26000, notes: "Negotiating terms", month: "2026-03", confirmed: false, lastContact: "2026-06-11" },
@@ -178,21 +177,21 @@ const PROSPECTS: Prospect[] = [
   { id: 16, company: "Trey Research",        stage: "Qualified",    bdr: "Daryl",   ae: "Garrett Martell", contact: "Sam Okine",      meetingDate: "2026-03-11", quote: 19000, notes: "Pilot proposed", month: "2026-03", confirmed: false, lastContact: "2026-06-13" },
   { id: 17, company: "Lucerne Publishing",   stage: "Closed Won",   bdr: "Gabriel", ae: "Tor Gordon",      contact: "Aya Kato",       meetingDate: "2026-03-15", quote: 41000, notes: "Renewed + upsell", month: "2026-03", confirmed: true,  lastContact: "2026-03-15" },
   { id: 19, company: "Woodgrove Bank",       stage: "Quoted",       bdr: "Luke",    ae: "Matt Elmer",      contact: "Nora Beck",      meetingDate: "2026-03-20", quote: 67000, notes: "Legal reviewing MSA", month: "2026-03", confirmed: false, lastContact: "2026-06-16" },
-  { id: 20, company: "The Phone Company",    stage: "Ghosting",     bdr: "Dino",    ae: "Andrew Gordillo", contact: "Ivan Cruz",      meetingDate: "2026-03-24", quote: 22000, notes: "Lost to competitor?", month: "2026-03", confirmed: false, lastContact: "2026-03-24" },
+  { id: 20, company: "The Phone Company",    stage: "Closed Lost",     bdr: "Dino",    ae: "Andrew Gordillo", contact: "Ivan Cruz",      meetingDate: "2026-03-24", quote: 22000, notes: "Lost to competitor?", month: "2026-03", confirmed: false, lastContact: "2026-03-24" },
   { id: 21, company: "Bellows College",      stage: "Closed Won",   bdr: "Andrew",  ae: "Sam Noyce",       contact: "Faye Lin",       meetingDate: "2026-04-01", quote: 35000, notes: "Education discount applied", month: "2026-04", confirmed: true,  lastContact: "2026-04-01" },
   { id: 22, company: "Best For You Organics", stage: "Qualified",   bdr: "Luke",    ae: "Gavin Winchell",  contact: "Omar Reed",      meetingDate: "2026-04-04", quote: 24000, notes: "Evaluating vs incumbent", month: "2026-04", confirmed: false, lastContact: "2026-06-17" },
   { id: 23, company: "First Up Consultants", stage: "Meeting Booked", bdr: "Parker", ae: "Garrett Martell", contact: "Zoe Hart",     meetingDate: "2026-04-07", quote: 16000, notes: "Intro deck sent", month: "2026-04", confirmed: false, lastContact: "2026-06-12" },
   { id: 24, company: "Relecloud",            stage: "Quoted",       bdr: "Amos",    ae: "Tor Gordon",      contact: "Marco Diaz",     meetingDate: "2026-04-10", quote: 58000, notes: "Proposal with 2 options", month: "2026-04", confirmed: false, lastContact: "2026-06-16" },
   { id: 25, company: "Southridge Video",     stage: "Closed Won",   bdr: "Jed",     ae: "Alex Frankel",    contact: "Nia Bello",      meetingDate: "2026-04-14", quote: 47000, notes: "Fast close, referral", month: "2026-04", confirmed: true,  lastContact: "2026-04-14" },
   { id: 27, company: "Nod Publishers",       stage: "Qualified",    bdr: "Ben",     ae: "Andrew Gordillo", contact: "Ada Quinn",      meetingDate: "2026-04-19", quote: 29000, notes: "Security review passed", month: "2026-04", confirmed: false, lastContact: "2026-06-15" },
-  { id: 28, company: "Wide World Importers", stage: "Ghosting",     bdr: "Daryl",   ae: "Sam Noyce",       contact: "Paul Rees",      meetingDate: "2026-04-22", quote: 20000, notes: "Champion left company", month: "2026-04", confirmed: false, lastContact: "2026-04-22" },
+  { id: 28, company: "Wide World Importers", stage: "Closed Lost",     bdr: "Daryl",   ae: "Sam Noyce",       contact: "Paul Rees",      meetingDate: "2026-04-22", quote: 20000, notes: "Champion left company", month: "2026-04", confirmed: false, lastContact: "2026-04-22" },
   { id: 29, company: "City Power & Light",   stage: "Closed Won",   bdr: "Gabriel", ae: "Gavin Winchell",  contact: "Tess Moran",     meetingDate: "2026-05-02", quote: 91000, notes: "Biggest deal of quarter", month: "2026-05", confirmed: true,  lastContact: "2026-05-02" },
   { id: 30, company: "Consolidated Messenger", stage: "Quoted",     bdr: "Carwyn",  ae: "Garrett Martell", contact: "Ben Cole",       meetingDate: "2026-05-05", quote: 33000, notes: "Verbal yes, paperwork", month: "2026-05", confirmed: false, lastContact: "2026-06-17" },
   { id: 31, company: "Lamna Healthcare",     stage: "Qualified",    bdr: "Luke",    ae: "Tor Gordon",      contact: "Rosa Vela",      meetingDate: "2026-05-08", quote: 45000, notes: "Compliance requirements clear", month: "2026-05", confirmed: false, lastContact: "2026-06-16" },
   { id: 32, company: "School of Fine Art",   stage: "Meeting Booked", bdr: "Dino",  ae: "Alex Frankel",    contact: "Luca Ferro",     meetingDate: "2026-05-11", quote: 13000, notes: "Demo booked", month: "2026-05", confirmed: false, lastContact: "2026-06-10" },
   { id: 33, company: "Fincher & Co",         stage: "Closed Won",   bdr: "Andrew",  ae: "Matt Elmer",      contact: "Gina Ross",      meetingDate: "2026-05-15", quote: 39000, notes: "Signed mid-month", month: "2026-05", confirmed: true,  lastContact: "2026-05-15" },
   { id: 35, company: "Contorted Living",     stage: "Quoted",       bdr: "Parker",  ae: "Sam Noyce",       contact: "Ivy Dunn",       meetingDate: "2026-05-21", quote: 51000, notes: "Discount requested", month: "2026-05", confirmed: false, lastContact: "2026-06-16" },
-  { id: 36, company: "Tall Poppy Co",        stage: "Ghosting",     bdr: "Amos",    ae: "Gavin Winchell",  contact: "Reed Frost",     meetingDate: "2026-05-24", quote: 17000, notes: "Unresponsive post-quote", month: "2026-05", confirmed: false, lastContact: "2026-05-24" },
+  { id: 36, company: "Tall Poppy Co",        stage: "Closed Lost",     bdr: "Amos",    ae: "Gavin Winchell",  contact: "Reed Frost",     meetingDate: "2026-05-24", quote: 17000, notes: "Unresponsive post-quote", month: "2026-05", confirmed: false, lastContact: "2026-05-24" },
   { id: 37, company: "Cronus Energy",        stage: "Closed Won",   bdr: "Jed",     ae: "Garrett Martell", contact: "Uma Shah",       meetingDate: "2026-06-01", quote: 64000, notes: "Landed and expanded", month: "2026-06", confirmed: true,  lastContact: "2026-06-01" },
   { id: 38, company: "Fibrous Networks",     stage: "Qualified",    bdr: "Oz",      ae: "Tor Gordon",      contact: "Milo Grant",     meetingDate: "2026-06-04", quote: 28000, notes: "POC in progress", month: "2026-06", confirmed: false, lastContact: "2026-06-17" },
   { id: 39, company: "Orchard Systems",      stage: "Quoted",       bdr: "Ben",     ae: "Alex Frankel",    contact: "Petra Nagy",     meetingDate: "2026-06-08", quote: 42000, notes: "Final approval this week", month: "2026-06", confirmed: false, lastContact: "2026-06-16" },
@@ -322,7 +321,6 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   // to the "Qualified" stage in this app.
   const discovery = inStage("Qualified");
   const won = inStage("Closed Won");
-  const ghosting = inStage("Ghosting");
   const lost = inStage("Closed Lost");
 
   const pct = (n: number) => Math.round((n / total) * 100);
@@ -331,7 +329,6 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
     { label: "Booked", count: booked, pct: 100, filter: "all" },
     { label: "Discovery", count: discovery, pct: pct(discovery), filter: "Qualified" },
     { label: "Closed Won", count: won, pct: pct(won), filter: "Closed Won" },
-    { label: "Ghosting", count: ghosting, pct: pct(ghosting), filter: "Ghosting" },
     { label: "Closed Lost", count: lost, pct: pct(lost), filter: "Closed Lost" },
   ];
 }
@@ -406,13 +403,13 @@ export type Kpis = {
   deals: number;    // total number of deals in view
 };
 
-// One glance at "how are we doing". Win rate = won / (won + ghosting), because
+// One glance at "how are we doing". Win rate = won / (won + lost), because
 // those are the deals that actually reached a decision.
 export function computeKpis(rows: Prospect[]): Kpis {
   const v = computeDealValues(rows);
   const won = rows.filter((r) => r.stage === "Closed Won").length;
-  const ghosting = rows.filter((r) => r.stage === "Ghosting").length;
-  const decided = won + ghosting;
+  const lost = rows.filter((r) => r.stage === "Closed Lost").length;
+  const decided = won + lost;
   return {
     pipeline: v.pipeline,
     won: v.won,
@@ -474,14 +471,14 @@ export function computeInsights(rows: Prospect[]): Insight[] {
     .filter((r) => openStages.includes(r.stage))
     .sort((a, b) => dealValue(b) - dealValue(a));
 
-  // Ghosting drag.
-  const ghost = rows.filter((r) => r.stage === "Ghosting");
-  if (ghost.length) {
-    const pct = Math.round((ghost.length / rows.length) * 100);
-    const val = ghost.reduce((s, r) => s + dealValue(r), 0);
+  // Closed Lost drag.
+  const lost = rows.filter((r) => r.stage === "Closed Lost");
+  if (lost.length) {
+    const pct = Math.round((lost.length / rows.length) * 100);
+    const val = lost.reduce((s, r) => s + dealValue(r), 0);
     out.push({
       tone: "warning",
-      text: `${pct}% of deals are ghosting — ${plural(ghost.length, "deal")} worth ${fmtMoney(val)}.`,
+      text: `${pct}% of deals are closed lost — ${plural(lost.length, "deal")} worth ${fmtMoney(val)}.`,
     });
   }
 
@@ -544,7 +541,7 @@ export function daysSinceContact(p: Prospect, today: string = todayISO()): numbe
 // Logging a newer lastContact date automatically pulls it back to "safe".
 export function dealHealth(p: Prospect, today: string = todayISO()): DealHealth {
   if (p.stage === "Closed Won") return "won";
-  if (p.stage === "Ghosting" || p.stage === "Closed Lost") return "risk";
+  if (p.stage === "Closed Lost") return "risk";
   const d = daysSinceContact(p, today);
   // An open deal with no positive contact logged still needs a chase, so it
   // reads amber ("chase soon") rather than sitting there uncoloured.

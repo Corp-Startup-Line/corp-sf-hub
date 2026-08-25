@@ -99,8 +99,9 @@ const REVALIDATE_SECONDS = 5 * 60; // 5 minutes
 // remove a teammate there; both this route and the dashboard read from it.
 
 // HubSpot's internal stage IDs → the dashboard's stage names.
-// (Mapping confirmed with Carwyn: HubSpot's "Closed Lost" shows as Ghosting;
-// HubSpot's "Disqualified" shows as Closed Lost.)
+// (Mapping confirmed with Carwyn: HubSpot's "Closed Lost" shows as Closed Lost so
+// the dashboard mirrors HubSpot; HubSpot's "Disqualified" also folds into Closed
+// Lost — both dead stages read as one "Closed Lost".)
 // NOTE: The old "Quoted" stage came from the retired Corgi/Django system. With
 // Django access gone we no longer track it, so HubSpot's two former Quoted
 // stages now fold into "Meeting Booked" — each deal keeps its quote amount, only
@@ -111,7 +112,7 @@ const STAGE_BY_HUBSPOT: Record<string, Stage> = {
   "2808562411": "Meeting Booked", // was "Quoted"
   "3653087972": "Meeting Booked", // was "Quoted" ("Contract Sent")
   closedwon: "Closed Won",
-  closedlost: "Ghosting",
+  closedlost: "Closed Lost",
   "3448964848": "Closed Lost", // "Disqualified"
 };
 
@@ -398,7 +399,6 @@ const STAGE_PRIORITY: Record<Stage, number> = {
   Quoted: 4,
   Qualified: 3,
   "Meeting Booked": 2,
-  Ghosting: 1,
   "Closed Lost": 0,
 };
 
@@ -632,7 +632,7 @@ export const getCachedProspects = unstable_cache(
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v21"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v22"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 
