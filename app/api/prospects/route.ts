@@ -430,17 +430,21 @@ function byRealThenNewer(a: Prospect, b: Prospect): number {
   return ms(b.meetingDate) - ms(a.meetingDate);
 }
 
-// Collapse duplicate company rows down to ONE deal per company per BDR. HubSpot
-// routinely holds the same opportunity several times for one rep — a real deal
-// plus an earlier-stage leftover or a ghosted shell. A single BDR must never see
-// the same company twice, so within each company+BDR we keep only the most-real
-// row (confirmed money → furthest stage → biggest amount) and drop the rest. Two
-// different BDRs genuinely working the same company are kept apart (one row
-// each), so neither rep's board loses a deal.
+// Collapse duplicate company rows down per company + BDR + deal amount. HubSpot
+// routinely holds the SAME opportunity several times for one rep — a real deal
+// plus an earlier-stage leftover or a ghosted shell — and those are true
+// duplicates we must merge. But the same customer can also buy MORE THAN ONE
+// policy (e.g. Rondah AI or AdvisorGenie taking a second, differently-priced
+// policy), and those are genuinely separate deals that must both count. We tell
+// them apart by amount: rows with the SAME company+BDR AND the same amount are
+// treated as duplicates of one opportunity and collapsed to the most-real row;
+// rows with a DIFFERENT amount survive as separate deals. Two different BDRs
+// working the same company are still kept apart (one row each per amount), so no
+// rep's board loses a deal.
 function dedupeByCompany(rows: Prospect[]): Prospect[] {
   const groups = new Map<string, Prospect[]>();
   for (const r of rows) {
-    const key = `${r.company.trim().toLowerCase()}::${r.bdr}`;
+    const key = `${r.company.trim().toLowerCase()}::${r.bdr}::${r.quote ?? 0}`;
     const g = groups.get(key);
     if (g) g.push(r);
     else groups.set(key, [r]);
@@ -503,13 +507,16 @@ function pickOwner(deals: Prospect[]): Prospect {
   return [...deals].sort((a, b) => (ownsMore(a, b) ? -1 : 1))[0];
 }
 
-// Collapse every company down to a single owner (one row per company, full
-// stop). Needs engagement dates (lastInbound) already attached so the rules of
-// engagement above can see who's actively in contact.
+// Collapse every company down to a single owner PER distinct opportunity. We key
+// by company + amount: two BDRs holding the SAME opportunity (same amount) for
+// one company resolve down to a single owner via the rules of engagement, but a
+// customer's genuinely separate policies (different amounts) each survive as
+// their own row. Needs engagement dates (lastInbound) already attached so the
+// rules of engagement above can see who's actively in contact.
 function collapseCrossBdr(rows: Prospect[]): Prospect[] {
   const groups = new Map<string, Prospect[]>();
   for (const r of rows) {
-    const key = normalizeCompany(r.company);
+    const key = `${normalizeCompany(r.company)}::${r.quote ?? 0}`;
     const g = groups.get(key);
     if (g) g.push(r);
     else groups.set(key, [r]);
@@ -632,7 +639,7 @@ export const getCachedProspects = unstable_cache(
     if (!token) throw new Error("HUBSPOT_TOKEN is not set on the server.");
     return loadProspects(token);
   },
-  ["prospects-v22"], // cache key (no secrets); bump the suffix to force a refresh
+  ["prospects-v23"], // cache key (no secrets); bump the suffix to force a refresh
   { revalidate: REVALIDATE_SECONDS, tags: ["prospects"] },
 );
 
