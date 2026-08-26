@@ -9,7 +9,10 @@ import {
   dealValue,
   hubspotUrl,
   effectiveStage,
+  displayStage,
   monthsFromRows,
+  loadEditorName,
+  saveEditorName,
   type DealHealth,
   type Prospect,
   type Stage,
@@ -124,6 +127,10 @@ const OUTSIDE_HINT =
 // lives in "Meeting Booked". Mirrors the funnel.
 const FILTER_STAGES = STAGES.filter((s) => s !== "Qualified" && s !== "Quoted");
 
+// Plain-English tooltip for the manual-quote column.
+const MANUAL_QUOTE_HINT =
+  "A quote anyone on the team can type in and edit — shared so everyone sees the same number. It's a note only: it does NOT change ARR, Closed Won, or any revenue total (those come from HubSpot). Entering one bumps a Meeting-Booked deal's badge to Quoted.";
+
 const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "company", label: "Company" },
   { key: "stage", label: "Stage" },
@@ -131,6 +138,7 @@ const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "ae", label: "AE" },
   { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
   { key: "quote", label: "Quote (Corgi)" },
+  { key: null, label: "Manual Quote", hint: MANUAL_QUOTE_HINT },
   { key: "lastContact", label: "Last Rep Contact (you)", hint: OUTBOUND_HINT },
   { key: null, label: "Outside activity", hint: OUTSIDE_HINT },
 ];
@@ -143,6 +151,8 @@ export default function ProspectsTable({
   onStageFilter,
   singleRep,
   aeView,
+  onSaveQuote,
+  quoteStoreConfigured,
 }: {
   rows: Prospect[];
   wonOnly: boolean;
@@ -158,6 +168,15 @@ export default function ProspectsTable({
   // strip — from the deal's BDR to its AE, so an AE never sees their own activity
   // flagged as "someone else touched it".
   aeView: boolean;
+  // Save (value) or clear (null) a deal's shared manual quote. Returns ok/false,
+  // with notConfigured when the shared store hasn't been connected yet.
+  onSaveQuote: (
+    id: number,
+    value: number | null,
+    by: string,
+  ) => Promise<{ ok: boolean; notConfigured?: boolean }>;
+  // False when the shared quote store isn't connected — shows a setup hint.
+  quoteStoreConfigured: boolean;
 }) {
   const [search, setSearch] = useState("");
   // A month filter LOCAL to this table (like the search box), so you can narrow
@@ -172,6 +191,66 @@ export default function ProspectsTable({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+
+  // ---- Manual quote inline editor ----
+  // Which row is being edited (by deal id), plus the draft amount and the
+  // free-text editor name. The name is remembered in the browser so a rep only
+  // types it once. `savingId` disables the buttons mid-save; `quoteError` shows a
+  // short inline message when a save can't go through.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [draftAmount, setDraftAmount] = useState("");
+  const [draftName, setDraftName] = useState("");
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftName(loadEditorName());
+  }, []);
+
+  function beginEdit(r: Prospect) {
+    setQuoteError(null);
+    setEditingId(r.id);
+    setDraftAmount(r.manualQuote != null ? String(r.manualQuote) : "");
+    setDraftName(loadEditorName());
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setQuoteError(null);
+  }
+
+  async function commitEdit(r: Prospect, clear = false) {
+    const name = draftName.trim();
+    if (!clear && !name) {
+      setQuoteError("Add your name");
+      return;
+    }
+    let value: number | null;
+    if (clear) {
+      value = null;
+    } else {
+      const n = Number(draftAmount.replace(/[^0-9.]/g, ""));
+      if (!Number.isFinite(n) || n < 0) {
+        setQuoteError("Enter a number");
+        return;
+      }
+      value = Math.round(n);
+    }
+    setSavingId(r.id);
+    setQuoteError(null);
+    const res = await onSaveQuote(r.id, value, name);
+    setSavingId(null);
+    if (res.notConfigured) {
+      setQuoteError("Quote store not connected yet");
+      return;
+    }
+    if (!res.ok) {
+      setQuoteError("Couldn't save — try again");
+      return;
+    }
+    if (!clear) saveEditorName(name);
+    setEditingId(null);
+  }
 
   // When you click the "Closed Won Value" card, jump to quote (high → low).
   useEffect(() => {
@@ -398,8 +477,16 @@ export default function ProspectsTable({
         </div>
       </div>
 
+      {!quoteStoreConfigured && (
+        <div className="mb-3 rounded-xl border border-amber-400/40 bg-amber-400/[0.08] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          Manual quotes aren&apos;t saving yet — the shared store isn&apos;t
+          connected. Connect an Upstash Redis store in Vercel (Storage → Create
+          Database) to turn this on for everyone.
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-2xl border border-white/50 bg-gradient-to-b from-white/60 to-white/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6),0_12px_34px_-16px_rgba(0,0,0,0.18)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.12] dark:from-white/[0.08] dark:to-white/[0.03]">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[1000px] text-left text-sm">
           <thead>
             <tr className="border-b border-black/5 text-xs uppercase tracking-wider text-neutral-500 dark:border-white/10 dark:text-neutral-400">
               {COLUMNS.map((c) => (
@@ -487,7 +574,10 @@ export default function ProspectsTable({
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <StageBadge stage={effectiveStage(r)} />
+                  {/* Show "Quoted" once a manual quote is entered on a still-
+                      Meeting-Booked deal (displayStage). This is a visual bump
+                      only — the real stage, and every money figure, is untouched. */}
+                  <StageBadge stage={displayStage(r)} />
                 </td>
                 <td className="px-4 py-3">{r.bdr}</td>
                 <td className="px-4 py-3">{r.owner ?? r.ae}</td>
@@ -503,6 +593,96 @@ export default function ProspectsTable({
                     moneyFull(dealValue(r))
                   ) : (
                     <span className="text-neutral-400">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {editingId === r.id ? (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-neutral-400">$</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoFocus
+                          value={draftAmount}
+                          onChange={(e) => setDraftAmount(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitEdit(r);
+                            if (e.key === "Escape") cancelEdit();
+                          }}
+                          placeholder="0"
+                          className="w-24 rounded-lg border border-corgi-ginger/40 bg-white/80 px-2 py-1 text-sm tabular-nums outline-none focus:ring-2 focus:ring-corgi-ginger/40 dark:bg-white/10"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={draftName}
+                        onChange={(e) => setDraftName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit(r);
+                          if (e.key === "Escape") cancelEdit();
+                        }}
+                        placeholder="Your name"
+                        className="w-32 rounded-lg border border-black/10 bg-white/80 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-corgi-ginger/40 dark:border-white/15 dark:bg-white/10"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => commitEdit(r)}
+                          disabled={savingId === r.id}
+                          className="rounded-lg bg-corgi-ginger px-2 py-1 text-xs font-medium text-white transition hover:brightness-105 disabled:opacity-50"
+                        >
+                          {savingId === r.id ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="rounded-lg px-2 py-1 text-xs text-neutral-500 transition hover:text-neutral-800 dark:hover:text-neutral-200"
+                        >
+                          Cancel
+                        </button>
+                        {r.manualQuote != null && (
+                          <button
+                            type="button"
+                            onClick={() => commitEdit(r, true)}
+                            disabled={savingId === r.id}
+                            className="rounded-lg px-2 py-1 text-xs text-rose-500 transition hover:text-rose-600 disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      {quoteError && (
+                        <span className="text-xs text-rose-500">{quoteError}</span>
+                      )}
+                    </div>
+                  ) : r.manualQuote != null ? (
+                    <button
+                      type="button"
+                      onClick={() => beginEdit(r)}
+                      title="Edit manual quote"
+                      className="group flex flex-col items-start gap-0.5 text-left"
+                    >
+                      <span className="font-medium tabular-nums text-neutral-800 underline-offset-2 group-hover:text-corgi-ginger group-hover:underline dark:text-neutral-100">
+                        {moneyFull(r.manualQuote)}
+                      </span>
+                      {(r.manualQuoteBy || r.manualQuoteAt) && (
+                        <span className="text-xs text-neutral-400">
+                          {r.manualQuoteBy ? r.manualQuoteBy : "—"}
+                          {r.manualQuoteAt
+                            ? ` · ${shortDate(r.manualQuoteAt.slice(0, 10))}`
+                            : ""}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => beginEdit(r)}
+                      className="rounded-lg border border-dashed border-black/15 px-2 py-1 text-xs text-neutral-400 transition hover:border-corgi-ginger/50 hover:text-corgi-ginger dark:border-white/15"
+                    >
+                      + Add quote
+                    </button>
                   )}
                 </td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">

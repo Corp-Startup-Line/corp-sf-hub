@@ -140,6 +140,15 @@ export type Prospect = {
   // inbound/outbound off the SAME rows Pipeline uses. Undefined on sample rows.
   closeDate?: string | null;   // the resolved close date (full "YYYY-MM-DD", migration-corrected)
   source?: string | null;      // HubSpot deal "source" (Inbound / Referral / Outbound…)
+  // ---- Manual quote overlay (DISPLAY-ONLY, from /api/manual-quote) -------------
+  // A number a teammate typed onto this deal in the table, shared across all
+  // users. It NEVER feeds ARR / Closed Won / any money total — those stay driven
+  // by HubSpot's `quote`. Attached client-side by applyManualQuotes(); undefined
+  // when no one has entered one. `manualQuoteBy` / `manualQuoteAt` record who last
+  // edited it and when (trust-based; there are no per-user logins).
+  manualQuote?: number;
+  manualQuoteBy?: string;
+  manualQuoteAt?: string;
 };
 
 // The ONE source of truth for which stage a deal counts as. Every number now
@@ -153,6 +162,16 @@ export function effectiveStage(p: Prospect): Stage {
 // A deal counts as "Quoted" when it sits in HubSpot's Quoted stage.
 export function isQuoted(p: Prospect): boolean {
   return effectiveStage(p) === "Quoted";
+}
+
+// The stage to SHOW in the table badge. A deal that's had a manual quote entered
+// while still sitting at "Meeting Booked" reads as "Quoted" — a purely visual
+// bump so the board reflects that a quote is out. This is DISPLAY-ONLY: it is
+// never written back to the row's real `stage`, so it can't reach HubSpot or any
+// money/stage math (which all key off `stage` / `effectiveStage`, not this).
+export function displayStage(p: Prospect): Stage {
+  if (p.manualQuote != null && p.stage === "Meeting Booked") return "Quoted";
+  return effectiveStage(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +261,105 @@ export async function getRoster(): Promise<Roster | null> {
     return null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MANUAL QUOTES (display-only overlay). A small shared map, keyed by HubSpot
+// deal id, of numbers teammates have typed onto deals. Fetched separately from
+// the deals so it never touches the cached /api/prospects payload or any money
+// math — we simply attach the values onto rows as extra fields for the table.
+// ---------------------------------------------------------------------------
+export type ManualQuoteEntry = { value: number; by: string; at: string };
+export type ManualQuoteMap = Record<string, ManualQuoteEntry>;
+
+// Load the shared overlay. `configured` is false when the store isn't connected
+// yet (see quoteStore.ts) — the UI uses that to show a setup hint instead of
+// letting saves fail silently.
+export async function getManualQuotes(): Promise<{
+  configured: boolean;
+  quotes: ManualQuoteMap;
+}> {
+  try {
+    const res = await fetch("/api/manual-quote", { cache: "no-store" });
+    if (!res.ok) return { configured: false, quotes: {} };
+    const data = await res.json();
+    return {
+      configured: Boolean(data?.configured),
+      quotes: (data?.quotes ?? {}) as ManualQuoteMap,
+    };
+  } catch {
+    return { configured: false, quotes: {} };
+  }
+}
+
+// Attach the overlay onto rows as DISPLAY-ONLY fields. Crucially this only ever
+// ADDS manualQuote/manualQuoteBy/manualQuoteAt — it never changes `quote` or
+// `stage`, so every money figure (which reads only those two) is provably
+// unaffected. Returns the same rows untouched when the map is empty.
+export function applyManualQuotes(
+  rows: Prospect[],
+  map: ManualQuoteMap,
+): Prospect[] {
+  if (!map || Object.keys(map).length === 0) return rows;
+  return rows.map((r) => {
+    const m = map[String(r.id)];
+    if (!m) return r;
+    return { ...r, manualQuote: m.value, manualQuoteBy: m.by, manualQuoteAt: m.at };
+  });
+}
+
+// Save (or clear, when value is null) a deal's manual quote to the shared store.
+// Returns the saved entry, whether it was cleared, and a flag telling the caller
+// if the store just isn't connected yet (so the UI can show the setup hint).
+export async function saveManualQuote(
+  id: number,
+  value: number | null,
+  by: string,
+): Promise<{
+  ok: boolean;
+  entry?: ManualQuoteEntry;
+  cleared?: boolean;
+  notConfigured?: boolean;
+}> {
+  try {
+    const res = await fetch("/api/manual-quote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, value, by }),
+    });
+    if (res.status === 503) return { ok: false, notConfigured: true };
+    if (!res.ok) return { ok: false };
+    const data = await res.json();
+    return {
+      ok: true,
+      entry: data?.entry as ManualQuoteEntry | undefined,
+      cleared: Boolean(data?.cleared),
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// Remember the last name someone used to sign a quote edit, so a rep doesn't
+// retype it every time. Purely a convenience — it's just a label on the edit.
+const EDITOR_NAME_KEY = "corgi-editor-name";
+
+export function loadEditorName(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(EDITOR_NAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveEditorName(name: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(EDITOR_NAME_KEY, name);
+  } catch {
+    // best-effort; ignore storage errors
   }
 }
 

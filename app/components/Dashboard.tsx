@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getProspects,
   getRoster,
+  getManualQuotes,
+  applyManualQuotes,
+  saveManualQuote,
   loadCachedProspects,
   filterProspects,
   computeFunnel,
@@ -18,6 +21,7 @@ import {
   type Filters,
   type Stage,
   type Prospect,
+  type ManualQuoteMap,
 } from "../lib/data";
 import { Skeleton } from "../lib/ui";
 import Header from "./Header";
@@ -64,6 +68,51 @@ export default function Dashboard() {
       clearInterval(id);
     };
   }, []);
+
+  // ---- Manual quotes: the shared, DISPLAY-ONLY overlay (see quoteStore.ts). ----
+  // Keyed by HubSpot deal id. We keep it as its own state and only ever attach it
+  // onto rows as extra fields, so it can never reach any money computation.
+  const [manualMap, setManualMap] = useState<ManualQuoteMap>({});
+  // False until we know the shared store is connected; drives the setup hint.
+  const [quoteStoreConfigured, setQuoteStoreConfigured] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    const loadQuotes = () =>
+      getManualQuotes().then(({ configured, quotes }) => {
+        if (!alive) return;
+        setQuoteStoreConfigured(configured);
+        setManualMap(quotes);
+      });
+    loadQuotes();
+    // Re-pull periodically so one teammate's edits show up for everyone.
+    const id = setInterval(loadQuotes, 60 * 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Save (or clear) a manual quote, then reflect it locally right away so the
+  // editor sees their change instantly without waiting for the next poll.
+  async function handleSaveQuote(
+    id: number,
+    value: number | null,
+    by: string,
+  ): Promise<{ ok: boolean; notConfigured?: boolean }> {
+    const res = await saveManualQuote(id, value, by);
+    if (res.notConfigured) {
+      setQuoteStoreConfigured(false);
+      return { ok: false, notConfigured: true };
+    }
+    if (!res.ok) return { ok: false };
+    setManualMap((m) => {
+      const next = { ...m };
+      if (res.cleared) delete next[String(id)];
+      else if (res.entry) next[String(id)] = res.entry;
+      return next;
+    });
+    return { ok: true };
+  }
 
   // The official team roster from the server (app/api/prospects/team.ts). We show
   // everyone on it — even a rep with 0 deals so far, like someone just added — so
@@ -143,7 +192,14 @@ export default function Dashboard() {
   }, [filters.bdr, filters.ae]);
 
   // ---- Derived data (recalculated only when inputs change) ----
-  const rows = useMemo(() => filterProspects(allRows, filters), [allRows, filters]);
+  // Attach the manual-quote overlay (display-only fields) before anything else.
+  // This ONLY adds manualQuote/By/At; it never changes `quote` or `stage`, so all
+  // the money math below is provably unaffected by manual quotes.
+  const overlaidRows = useMemo(
+    () => applyManualQuotes(allRows, manualMap),
+    [allRows, manualMap],
+  );
+  const rows = useMemo(() => filterProspects(overlaidRows, filters), [overlaidRows, filters]);
   const funnel = useMemo(() => computeFunnel(rows), [rows]);
   const values = useMemo(() => computeDealValues(rows), [rows]);
   const quota = useMemo(
@@ -221,6 +277,8 @@ export default function Dashboard() {
             onStageFilter={selectStage}
             singleRep={singleRep}
             aeView={filters.ae !== "all"}
+            onSaveQuote={handleSaveQuote}
+            quoteStoreConfigured={quoteStoreConfigured}
           />
         </>
       )}
