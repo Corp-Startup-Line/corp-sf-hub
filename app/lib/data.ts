@@ -429,8 +429,11 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   const total = rows.length || 1; // avoid divide-by-zero
   // Count by HubSpot stage for every card, so each deal sits in exactly one
   // stage and each card's number matches the (strictly filtered) rows it opens.
+  // Count by DISPLAY stage so the "Quoted" card matches the table badge: a
+  // Meeting-Booked deal with a manual quote reads as Quoted here too. This is
+  // display-only — displayStage never touches money (KPIs key off `stage`).
   const inStage = (stage: Stage) =>
-    rows.filter((r) => effectiveStage(r) === stage).length;
+    rows.filter((r) => displayStage(r) === stage).length;
 
   // Every deal in the pipeline started as a booked meeting, so "Booked" is the
   // top of the funnel and equals the total deal count (100%).
@@ -438,6 +441,9 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   // "Discovery" = deals in HubSpot's Discovery stage (qualifiedtobuy), which maps
   // to the "Qualified" stage in this app.
   const discovery = inStage("Qualified");
+  // "Quoted" = deals showing as Quoted: HubSpot's own Quoted stage plus any
+  // Meeting-Booked deal that's had a manual quote entered (the display bump).
+  const quoted = inStage("Quoted");
   const won = inStage("Closed Won");
   const lost = inStage("Closed Lost");
 
@@ -446,6 +452,7 @@ export function computeFunnel(rows: Prospect[]): FunnelStage[] {
   return [
     { label: "Booked", count: booked, pct: 100, filter: "all" },
     { label: "Discovery", count: discovery, pct: pct(discovery), filter: "Qualified" },
+    { label: "Quoted", count: quoted, pct: pct(quoted), filter: "Quoted" },
     { label: "Closed Won", count: won, pct: pct(won), filter: "Closed Won" },
     { label: "Closed Lost", count: lost, pct: pct(lost), filter: "Closed Lost" },
   ];

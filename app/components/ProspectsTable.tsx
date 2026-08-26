@@ -11,8 +11,6 @@ import {
   effectiveStage,
   displayStage,
   monthsFromRows,
-  loadEditorName,
-  saveEditorName,
   type DealHealth,
   type Prospect,
   type Stage,
@@ -105,7 +103,8 @@ type SortKey =
   | "ae"
   | "lastInbound"
   | "quote"
-  | "lastContact";
+  | "lastContact"
+  | "outside";
 
 // Plain-English tooltip for the engagement column, so it's clear what the date
 // means.
@@ -120,12 +119,12 @@ const OUTBOUND_HINT =
 const OUTSIDE_HINT =
   "The newest activity on this deal logged by someone OTHER than its own rep — who did it, and when. Blank if the rep is the most recent to touch it.";
 
-// Stages offered in the Stage filter dropdown. The funnel no longer has a
-// "Qualified" card, so the dropdown must not offer it either — otherwise you
-// could filter to a stage the funnel doesn't show. "Quoted" is also dropped:
-// with Django retired we no longer track it, and every former Quoted deal now
-// lives in "Meeting Booked". Mirrors the funnel.
-const FILTER_STAGES = STAGES.filter((s) => s !== "Qualified" && s !== "Quoted");
+// Stages offered in the Stage filter dropdown. The funnel has no "Qualified"
+// card, so the dropdown must not offer it either — otherwise you could filter to
+// a stage the funnel doesn't show. "Quoted" IS offered: it mirrors the funnel's
+// Quoted card (HubSpot-Quoted deals plus Meeting-Booked deals with a manual
+// quote), matched on displayStage so the list matches what the card counted.
+const FILTER_STAGES = STAGES.filter((s) => s !== "Qualified");
 
 // Plain-English tooltip for the manual-quote column.
 const MANUAL_QUOTE_HINT =
@@ -137,10 +136,9 @@ const COLUMNS: { key: SortKey | null; label: string; hint?: string }[] = [
   { key: "bdr", label: "BDR" },
   { key: "ae", label: "AE" },
   { key: "lastInbound", label: "Last Positive Contact", hint: INBOUND_HINT },
-  { key: "quote", label: "Quote (Corgi)" },
   { key: null, label: "Manual Quote", hint: MANUAL_QUOTE_HINT },
   { key: "lastContact", label: "Last Rep Contact (you)", hint: OUTBOUND_HINT },
-  { key: null, label: "Outside activity", hint: OUTSIDE_HINT },
+  { key: "outside", label: "Outside activity", hint: OUTSIDE_HINT },
 ];
 
 export default function ProspectsTable({
@@ -193,25 +191,18 @@ export default function ProspectsTable({
   const [pageSize, setPageSize] = useState(25);
 
   // ---- Manual quote inline editor ----
-  // Which row is being edited (by deal id), plus the draft amount and the
-  // free-text editor name. The name is remembered in the browser so a rep only
-  // types it once. `savingId` disables the buttons mid-save; `quoteError` shows a
-  // short inline message when a save can't go through.
+  // Which row is being edited (by deal id) and its draft amount. `savingId`
+  // disables the buttons mid-save; `quoteError` shows a short inline message when
+  // a save can't go through.
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftAmount, setDraftAmount] = useState("");
-  const [draftName, setDraftName] = useState("");
   const [savingId, setSavingId] = useState<number | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraftName(loadEditorName());
-  }, []);
 
   function beginEdit(r: Prospect) {
     setQuoteError(null);
     setEditingId(r.id);
     setDraftAmount(r.manualQuote != null ? String(r.manualQuote) : "");
-    setDraftName(loadEditorName());
   }
 
   function cancelEdit() {
@@ -220,11 +211,6 @@ export default function ProspectsTable({
   }
 
   async function commitEdit(r: Prospect, clear = false) {
-    const name = draftName.trim();
-    if (!clear && !name) {
-      setQuoteError("Add your name");
-      return;
-    }
     let value: number | null;
     if (clear) {
       value = null;
@@ -238,7 +224,9 @@ export default function ProspectsTable({
     }
     setSavingId(r.id);
     setQuoteError(null);
-    const res = await onSaveQuote(r.id, value, name);
+    // No per-user name any more — the store still records a non-empty editor
+    // stamp (its API requires one), so we send a shared "Team" label.
+    const res = await onSaveQuote(r.id, value, "Team");
     setSavingId(null);
     if (res.notConfigured) {
       setQuoteError("Quote store not connected yet");
@@ -248,7 +236,6 @@ export default function ProspectsTable({
       setQuoteError("Couldn't save — try again");
       return;
     }
-    if (!clear) saveEditorName(name);
     setEditingId(null);
   }
 
@@ -266,7 +253,10 @@ export default function ProspectsTable({
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir("asc");
+      // Outside activity is a date, so first click shows newest-first (what you
+      // want when scanning for who touched a deal most recently). Every other
+      // column still starts ascending. A second click flips to oldest-first.
+      setSortDir(key === "outside" ? "desc" : "asc");
     }
   }
 
@@ -286,13 +276,14 @@ export default function ProspectsTable({
   // reflects the same scope you're viewing — never the whole team once you've
   // narrowed down to one BDR, stage or search.
   const filtered = useMemo(() => {
-    // Match by EFFECTIVE stage — the same Corgi-quote-aware definition the
-    // funnel cards use — so clicking any card (including "Quoted") shows exactly
-    // the deals that card counted, and never a Meeting-Booked/Closed-Won stray.
+    // Match by DISPLAY stage — the same quote-aware definition the funnel cards
+    // use — so clicking any card (including "Quoted") shows exactly the deals
+    // that card counted. A Meeting-Booked deal with a manual quote reads as
+    // Quoted here, matching its badge and the Quoted card's count.
     let out =
       stageFilter === "all"
         ? rows
-        : rows.filter((r) => effectiveStage(r) === stageFilter);
+        : rows.filter((r) => displayStage(r) === stageFilter);
     if (wonOnly) out = out.filter((r) => r.stage === "Closed Won");
     if (monthFilter !== "all") out = out.filter((r) => r.month === monthFilter);
 
@@ -331,8 +322,8 @@ export default function ProspectsTable({
   const processed = useMemo(() => {
     const out = touchedByOthers ? filtered.filter((r) => isFlagged(r, aeView)) : filtered;
     const sorted = [...out].sort((a, b) => {
-      // The "Quote" column shows the deal's Corgi value (dealValue), so sort by
-      // that same figure rather than the raw HubSpot amount.
+      // "quote" has no visible column any more, but the "Closed Won Value" card
+      // still sorts deals by their value — dealValue (the HubSpot deal amount).
       const resolve = (p: Prospect) =>
         sortKey === "quote"
           ? dealValue(p)
@@ -340,7 +331,12 @@ export default function ProspectsTable({
             ? lastPositiveContact(p)
             : sortKey === "ae"
               ? p.owner ?? p.ae
-              : p[sortKey];
+              : // Outside activity: sort by the newest non-rep touch's date (the
+                // view-correct one). "" for deals nobody-else touched, so they
+                // sink to the bottom when sorted newest-first.
+                sortKey === "outside"
+                ? outsideOf(p, aeView)?.date ?? ""
+                : p[sortKey];
       const av = resolve(a);
       const bv = resolve(b);
       let cmp: number;
@@ -360,8 +356,17 @@ export default function ProspectsTable({
   const start = (currentPage - 1) * pageSize;
   const pageRows = processed.slice(start, start + pageSize);
 
-  // Whenever the underlying data or page size changes, go back to page 1.
-  useEffect(() => setPage(1), [rows, wonOnly, stageFilter, monthFilter, touchedByOthers, search, pageSize]);
+  // A stable fingerprint of WHICH deals are in the table (their ids), so we can
+  // tell a real dataset change (you switched BDR/month/etc.) apart from a mere
+  // background refresh. The dashboard reloads prospects every few minutes and
+  // polls manual quotes every minute; each hands us a brand-new `rows` array
+  // with the SAME deals. Keying the page-reset on the ids (not the array
+  // reference) means those refreshes no longer bounce you back to page 1.
+  const rowsSig = useMemo(() => rows.map((r) => r.id).join(","), [rows]);
+
+  // Go back to page 1 only when the actual set of deals or a filter changes —
+  // never on a background refresh that returns the same deals.
+  useEffect(() => setPage(1), [rowsSig, wonOnly, stageFilter, monthFilter, touchedByOthers, search, pageSize]);
 
   return (
     <section className="mb-10">
@@ -588,15 +593,19 @@ export default function ProspectsTable({
                     <span className="text-neutral-400">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3 tabular-nums">
-                  {dealValue(r) > 0 ? (
-                    moneyFull(dealValue(r))
-                  ) : (
-                    <span className="text-neutral-400">—</span>
-                  )}
-                </td>
                 <td className="px-4 py-3">
-                  {editingId === r.id ? (
+                  {r.stage === "Closed Won" ? (
+                    // Closed Won deals show their HubSpot amount automatically —
+                    // no manual quote to type. Read-only, display-only: this just
+                    // mirrors dealValue (the HubSpot deal amount) and never feeds
+                    // any money total.
+                    <div className="flex flex-col items-start gap-0.5">
+                      <span className="font-medium tabular-nums text-neutral-800 dark:text-neutral-100">
+                        {dealValue(r) > 0 ? moneyFull(dealValue(r)) : "—"}
+                      </span>
+                      <span className="text-xs text-neutral-400">from HubSpot</span>
+                    </div>
+                  ) : editingId === r.id ? (
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-1.5">
                         <span className="text-neutral-400">$</span>
@@ -614,17 +623,6 @@ export default function ProspectsTable({
                           className="w-24 rounded-lg border border-corgi-ginger/40 bg-white/80 px-2 py-1 text-sm tabular-nums outline-none focus:ring-2 focus:ring-corgi-ginger/40 dark:bg-white/10"
                         />
                       </div>
-                      <input
-                        type="text"
-                        value={draftName}
-                        onChange={(e) => setDraftName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitEdit(r);
-                          if (e.key === "Escape") cancelEdit();
-                        }}
-                        placeholder="Your name"
-                        className="w-32 rounded-lg border border-black/10 bg-white/80 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-corgi-ginger/40 dark:border-white/15 dark:bg-white/10"
-                      />
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -679,7 +677,7 @@ export default function ProspectsTable({
                     <button
                       type="button"
                       onClick={() => beginEdit(r)}
-                      className="rounded-lg border border-dashed border-black/15 px-2 py-1 text-xs text-neutral-400 transition hover:border-corgi-ginger/50 hover:text-corgi-ginger dark:border-white/15"
+                      className="whitespace-nowrap rounded-lg border border-dashed border-black/15 px-2 py-1 text-xs text-neutral-400 transition hover:border-corgi-ginger/50 hover:text-corgi-ginger dark:border-white/15"
                     >
                       + Add quote
                     </button>
