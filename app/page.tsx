@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import TeamArrRing from "./components/TeamArrRing";
+import LogoutButton from "./components/LogoutButton";
 
 // Small stroke icon wrapper (Lucide-style paths) used by the playbook panels.
 function Ico({ children, size = 17 }: { children: ReactNode; size?: number }) {
@@ -279,7 +280,10 @@ function OutboundPlaybookCard() {
 
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-10 sm:px-6 lg:px-8">
+    <main className="relative mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-10 sm:px-6 lg:px-8">
+      <div className="absolute right-4 top-4 sm:right-6 sm:top-6 lg:right-8">
+        <LogoutButton />
+      </div>
       <div className="mb-6 text-center">
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           Corp SF Hub

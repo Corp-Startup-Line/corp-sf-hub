@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LogoutButton from "./LogoutButton";
 
 // The pulsing green dot + "live" wording.
 function LiveDot() {
@@ -83,6 +84,7 @@ export default function Header() {
           ← Home
         </a>
         <ThemeToggle />
+        <LogoutButton />
       </div>
     </header>
   );
