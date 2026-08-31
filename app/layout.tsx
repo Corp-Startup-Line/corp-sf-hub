@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import Sidebar from "./components/Sidebar";
 
 export const metadata: Metadata = {
   title: "Corgi Pipeline OS",
@@ -25,7 +26,12 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <div className="flex min-h-full">
+          <Sidebar />
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+      </body>
     </html>
   );
 }

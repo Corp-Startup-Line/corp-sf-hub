@@ -532,6 +532,23 @@ async function build() {
   // anyone from a leaderboard, can never move this total.
   const teamMonth = monthMoney(wonRows);
 
+  // TEAM TODAY — same shared wonRows, bucketed to the current Pacific calendar
+  // day. Powers the ARR "Daily" column on the SFCR dashboard; reconciles with
+  // team.arr/teamMonth the same way they reconcile with each other.
+  const todayStart = pacificMidnight(pnow.y, pnow.m, pnow.d);
+  const todayEnd = todayStart + 864e5;
+  const wonToday = wonRows.filter((r) => { const t = rowT(r); return t >= todayStart && t < todayEnd; });
+  const teamToday = { deals: wonToday.length, arr: wonToday.reduce((a, r) => a + (r.quote || 0), 0) };
+
+  // Working (Mon–Fri) days from the 1st of the month through today, inclusive —
+  // lets the client turn a monthly ARR target into a fair daily pace target
+  // without needing its own Pacific-calendar math.
+  let workDaysElapsed = 0;
+  for (let d = 1; d <= pnow.d; d++) {
+    const dow = new Date(Date.UTC(pnow.y, pnow.m - 1, d)).getUTCDay();
+    if (dow !== 0 && dow !== 6) workDaysElapsed++;
+  }
+
   return {
     updatedAt: new Date().toISOString(),
     weeks: WEEKS,
@@ -543,6 +560,8 @@ async function build() {
     aes,
     team,
     teamMonth,
+    teamToday,
+    workDaysElapsed,
   };
 }
 
