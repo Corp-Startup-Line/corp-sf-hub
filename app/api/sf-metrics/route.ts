@@ -9,6 +9,24 @@
 import { getCachedProspects } from "../prospects/route";
 import { TEAM_AE_NAMES } from "../prospects/team";
 import type { Prospect } from "../../lib/data";
+import {
+  getJsonMany,
+  setJson,
+  acquireLock,
+  releaseLock,
+} from "../../lib/metricsStore";
+
+// A weekly dial total for a week that has fully ended can never change, so we
+// cache it and stop re-asking HubSpot for it every refresh. SETTLE_MS lets late-
+// logged/backdated calls settle before we treat a just-ended week as final; only
+// weeks older than that are cached (long TTL — they roll out of the 15-week window
+// long before it expires). Cold cache ⇒ every week counted live ⇒ identical numbers.
+const DIAL_CACHE_TTL = 60 * 24 * 3600; // 60 days
+const DIAL_SETTLE_MS = 2 * 864e5; // 2 days grace before a week counts as "final"
+// Cross-instance refresh coordinator: only one serverless instance runs the
+// expensive cold build at a time (the in-memory `inflight` below only coordinates
+// within ONE instance). Auto-expires so a crashed holder never wedges refreshes.
+const REFRESH_LOCK_KEY = "corgi:lock:sf-metrics";
 
 // Cold builds fan out ~180 rate-limited HubSpot Search calls (the per-rep
 // activity loop) plus the shared Pipeline pull. That can run well past 60s on a
@@ -337,8 +355,59 @@ async function build() {
 
   // a dial = a call with any logged outcome (disposition set)
   const dialFilter = [{ propertyName: "hs_call_disposition", operator: "HAS_PROPERTY" }];
+
+  // Meetings booked/held this week — pulled ONCE for the whole team instead of two
+  // owner-scoped count() searches per BDR. A single week holds few meetings, so one
+  // paged retrieval (owner IN all BDRs) is far cheaper than 2×N counts and yields
+  // identical totals: booked = the rep's meetings starting this week; held = those
+  // whose outcome is COMPLETED. showRate = held/booked (unchanged). The GTE/LT
+  // window matches count() exactly, so every returned record is already in-window
+  // and we only need to tally by owner + outcome locally.
+  const curWkStart = wk[wk.length - 1];
+  const curWkEnd = wkEnd[wkEnd.length - 1];
+  const mtgBookedById = new Map<string, number>();
+  const mtgHeldById = new Map<string, number>();
+  if (bdrIds.length) {
+    let after = "";
+    do {
+      const j = await hs(`/crm/v3/objects/meetings/search`, {
+        limit: 200,
+        after: after || undefined,
+        properties: ["hubspot_owner_id", "hs_meeting_start_time", "hs_meeting_outcome"],
+        filterGroups: [
+          { filters: [
+            { propertyName: "hubspot_owner_id", operator: "IN", values: bdrIds },
+            { propertyName: "hs_meeting_start_time", operator: "GTE", value: `${curWkStart}` },
+            { propertyName: "hs_meeting_start_time", operator: "LT", value: `${curWkEnd}` },
+          ] },
+        ],
+      });
+      for (const m of j.results || []) {
+        const owner = `${m.properties?.hubspot_owner_id ?? ""}`;
+        if (!owner) continue;
+        mtgBookedById.set(owner, (mtgBookedById.get(owner) || 0) + 1);
+        if (`${m.properties?.hs_meeting_outcome ?? ""}` === "COMPLETED") {
+          mtgHeldById.set(owner, (mtgHeldById.get(owner) || 0) + 1);
+        }
+      }
+      after = j.paging?.next?.after || "";
+    } while (after);
+  }
+
   const repsActivity = await pool(bdrList, 5, async (o) => {
-    const dialsSeries = await pool(wk, 4, (s, i) => count("calls", o.id, "hs_timestamp", s, wkEnd[i], dialFilter));
+    // Weekly dials: reuse the cached total for any week that has fully ended (and
+    // settled), count only the still-open / not-yet-cached weeks live. This keeps
+    // the numbers identical (live count for anything not final) while dropping the
+    // ~15 count() calls per rep to just the current week once the cache is warm.
+    const dialKeys = wk.map((s) => `corgi:dials:${o.id}:${s}`);
+    const cachedDials = await getJsonMany<number>(dialKeys);
+    const dialsSeries = await pool(wk, 4, async (s, i) => {
+      const isFinal = wkEnd[i] + DIAL_SETTLE_MS <= now;
+      if (isFinal && typeof cachedDials[i] === "number") return cachedDials[i] as number;
+      const c = await count("calls", o.id, "hs_timestamp", s, wkEnd[i], dialFilter);
+      if (isFinal) await setJson(dialKeys[i], c, DIAL_CACHE_TTL); // now final ⇒ remember it
+      return c;
+    });
 
     const myBooked = demoDeals.filter((d) => dealBdrId(d) === o.id);
     const inBk = (s: number, i: number) => myBooked.filter((d) => inBucket(bookedAt(d), s, wkEnd[i]));
@@ -362,9 +431,8 @@ async function build() {
     const dailyIbDemos = [0, 1, 2, 3, 4].map((d) => (dayBounds(d)[0] > now ? null : dayBooked(d).filter(isInbound).length));
 
     const bookedWeek = demoSeries[demoSeries.length - 1];
-    const mtgBooked = await count("meetings", o.id, "hs_meeting_start_time", wk[wk.length - 1], wkEnd[wkEnd.length - 1]);
-    const mtgHeld = await count("meetings", o.id, "hs_meeting_start_time", wk[wk.length - 1], wkEnd[wkEnd.length - 1],
-      [{ propertyName: "hs_meeting_outcome", operator: "EQ", value: "COMPLETED" }]);
+    const mtgBooked = mtgBookedById.get(o.id) || 0;
+    const mtgHeld = mtgHeldById.get(o.id) || 0;
 
     const monthIdx = wk.map((s, i) => (wkEnd[i] > monthStart ? i : -1)).filter((i) => i >= 0);
     const sum = (arr: number[], idx: number[]) => idx.reduce((a, i) => a + arr[i], 0);
@@ -483,14 +551,27 @@ let cache: { at: number; data: any } = { at: 0, data: null };
 let inflight: Promise<any> | null = null;
 function rebuild(): Promise<any> {
   if (inflight) return inflight;
-  inflight = build()
-    .then((data) => {
+  // Point 3 — cross-instance refresh coordinator. The `inflight` guard above only
+  // dedupes work WITHIN one serverless instance. On Vercel many instances share one
+  // Redis, so without a shared lock N cold instances would each run the same ~40s
+  // HubSpot pull at once. acquireLock grants to exactly one; the losers serve their
+  // last good `cache.data` (or, if they have none, fall through and build anyway so
+  // a first-ever visitor is never left with nothing). When Redis is absent the lock
+  // returns "local" and this behaves EXACTLY as before. The lock only decides WHO
+  // computes, never WHAT — no figure changes.
+  inflight = (async () => {
+    const token = await acquireLock(REFRESH_LOCK_KEY, 120);
+    if (!token && cache.data) return cache.data;
+    try {
+      const data = await build();
       cache = { at: Date.now(), data };
       return data;
-    })
-    .finally(() => {
-      inflight = null;
-    });
+    } finally {
+      if (token) await releaseLock(REFRESH_LOCK_KEY, token);
+    }
+  })().finally(() => {
+    inflight = null;
+  });
   return inflight;
 }
 async function getMetrics() {

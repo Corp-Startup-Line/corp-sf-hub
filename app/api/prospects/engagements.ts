@@ -41,7 +41,41 @@
 // as the deals, so the extra HubSpot calls happen at most once per cache window.
 // ============================================================================
 
+import {
+  storeConfigured,
+  getJson,
+  setJson,
+  hGetJsonMany,
+  hSetJsonMany,
+} from "../../lib/metricsStore";
+
 const HUBSPOT_BASE = "https://api.hubapi.com";
+
+// --- Point 2: incremental engagement cache --------------------------------
+// enrichEngagements is the single most expensive part of the deals build — it
+// re-reads every call/meeting/note/email across the whole visible pipeline on
+// EVERY cold refresh. Most of those deals haven't changed since the last pull,
+// so we cache each deal's computed Engagement in one shared Redis hash and only
+// recompute deals whose cached result is missing or older than ENG_TTL_MS. A
+// deal computed more recently than that is reused verbatim.
+//
+// Because a deal's Engagement also depends on the owner/AE assignment passed in
+// `opts` (not just its own activity), a purely time-based refresh could serve a
+// slightly stale attribution after a reassignment. To bound that, we force a FULL
+// recompute of every visible deal every RECONCILE_MS regardless of per-deal age.
+//
+// SAFETY: when Redis is absent, or on a cold cache (every field misses), the set
+// of "stale" deals is simply ALL deals, so we compute exactly what the old code
+// computed — the output is byte-for-byte identical. The cache only decides WHICH
+// deals to recompute, never HOW any figure is calculated.
+const ENG_CACHE_KEY = "corgi:eng:cache";
+const ENG_RECONCILE_KEY = "corgi:eng:reconcileAt";
+const ENG_TTL_MS = 60 * 60 * 1000; // reuse a cached deal for up to 1h
+const RECONCILE_MS = 6 * 60 * 60 * 1000; // full pipeline recompute every 6h
+
+// One cached deal: its computed Engagement plus WHEN it was computed (so we can
+// age it out — a Redis hash field has no per-field TTL of its own).
+type CachedEngagement = { eng: Engagement; at: number };
 
 // Batch endpoints accept up to 100 ids per request.
 const BATCH = 100;
@@ -274,7 +308,10 @@ export type EnrichOptions = {
 // outgoing email owned by a DIFFERENT person is not). Customer INBOUND emails
 // never count as rep activity. Anything owned by a different teammate becomes the
 // deal's "outside activity" alert.
-export async function enrichEngagements(
+// The full pass, unchanged. Given a set of deal ids it reads every associated
+// engagement and computes each deal's Engagement from scratch. The incremental
+// wrapper below decides WHICH ids to hand it; this function's math is untouched.
+async function computeEngagements(
   token: string,
   dealIds: string[],
   opts: EnrichOptions,
@@ -501,6 +538,72 @@ export async function enrichEngagements(
       aeLastContact: aeAttr.repLastContact,
       aeOutside: aeAttr.outside,
     });
+  }
+  return out;
+}
+
+// Public entry point — incremental in front of computeEngagements. Reuses each
+// deal's cached Engagement when it's recent enough, recomputes only the stale/new
+// ones, and periodically forces a full reconcile. Degrades to a plain full pass
+// (identical output) whenever Redis is absent or the cache is cold.
+export async function enrichEngagements(
+  token: string,
+  dealIds: string[],
+  opts: EnrichOptions,
+): Promise<Map<string, Engagement>> {
+  // No store → no cache to consult; do exactly what the code always did.
+  if (!storeConfigured() || dealIds.length === 0) {
+    return computeEngagements(token, dealIds, opts);
+  }
+
+  const now = Date.now();
+
+  // Time-boxed full reconcile: if the last full recompute is older than
+  // RECONCILE_MS (or unknown), recompute EVERY visible deal this pass so any
+  // owner reassignment or missed update can't linger indefinitely.
+  const reconcileAt = (await getJson<number>(ENG_RECONCILE_KEY)) ?? 0;
+  const forceAll = now - reconcileAt >= RECONCILE_MS;
+
+  // Pull each deal's cached Engagement (aligned to dealIds; null per miss).
+  const cached = await hGetJsonMany<CachedEngagement>(ENG_CACHE_KEY, dealIds);
+
+  // A deal is stale when we're reconciling, or it has no cache entry, or its
+  // entry is older than the per-deal TTL. Stale deals get recomputed; the rest
+  // are served straight from cache.
+  const staleIds: string[] = [];
+  const cachedById = new Map<string, Engagement>();
+  dealIds.forEach((id, i) => {
+    const entry = cached[i];
+    const fresh =
+      !forceAll &&
+      entry != null &&
+      typeof entry.at === "number" &&
+      now - entry.at < ENG_TTL_MS;
+    if (fresh) cachedById.set(id, entry!.eng);
+    else staleIds.push(id);
+  });
+
+  // Recompute only the stale/new deals (all of them on a cold cache → identical
+  // to the old behaviour).
+  const fresh =
+    staleIds.length > 0
+      ? await computeEngagements(token, staleIds, opts)
+      : new Map<string, Engagement>();
+
+  // Persist the freshly computed deals back to the shared hash, stamped now.
+  if (fresh.size > 0) {
+    const writeBack: Record<string, CachedEngagement> = {};
+    for (const [id, eng] of fresh) writeBack[id] = { eng, at: now };
+    await hSetJsonMany(ENG_CACHE_KEY, writeBack);
+  }
+  if (forceAll) await setJson(ENG_RECONCILE_KEY, now, RECONCILE_MS / 1000);
+
+  // Merge: freshly computed wins, otherwise the cached value. Preserves the exact
+  // shape (one entry per requested deal id) the callers expect.
+  const out = new Map<string, Engagement>();
+  for (const id of dealIds) {
+    const eng = fresh.get(id) ?? cachedById.get(id);
+    if (eng) out.set(id, eng);
   }
   return out;
 }
