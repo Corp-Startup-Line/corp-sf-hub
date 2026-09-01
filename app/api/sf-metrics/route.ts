@@ -447,8 +447,6 @@ async function build() {
       dialsMonth: sum(dialsSeries, monthIdx),
       demosWk: bookedWeek,
       showRate: mtgBooked ? mtgHeld / mtgBooked : 0,
-      _mtgBooked: mtgBooked, // TEMP diagnostic — remove after showRate check
-      _mtgHeld: mtgHeld, // TEMP diagnostic — remove after showRate check
       series: { dials: dialsSeries, demos: demoSeries, obDemos, ibDemos },
       daily: { dials: dailyDials, demos: dailyDemos, obDemos: dailyObDemos, ibDemos: dailyIbDemos },
       startWeek: dialsSeries.findIndex((v) => v > 0),
