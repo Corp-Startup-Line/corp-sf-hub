@@ -438,6 +438,7 @@ async function build() {
     const sum = (arr: number[], idx: number[]) => idx.reduce((a, i) => a + arr[i], 0);
 
     return {
+      id: o.id,
       name: o.name,
       stage: Date.now() - +new Date(o.createdAt) < 30 * 864e5 ? "ramp" : "steady",
       dials: dialsToday,
@@ -445,7 +446,9 @@ async function build() {
       connects: null,
       dialsWeek: dialsSeries[dialsSeries.length - 1],
       dialsMonth: sum(dialsSeries, monthIdx),
+      demosToday: dailyDemos[todayIdx] ?? 0,
       demosWk: bookedWeek,
+      demosMonth: sum(demoSeries, monthIdx),
       showRate: mtgBooked ? mtgHeld / mtgBooked : 0,
       series: { dials: dialsSeries, demos: demoSeries, obDemos, ibDemos },
       daily: { dials: dailyDials, demos: dailyDemos, obDemos: dailyObDemos, ibDemos: dailyIbDemos },
@@ -457,12 +460,18 @@ async function build() {
   // rep's revenue in. wonRows = the de-duped Closed-Won rows the Pipeline uses. --
   const prospects = await prospectsP;
   const wonRows = prospects.filter((r) => r.stage === "Closed Won");
+  // Open (not yet Closed Won/Lost) rows — current pipeline valuation per BDR.
+  // A snapshot, not time-bucketed like the weekly/monthly series above.
+  const openRows = prospects.filter((r) => r.stage !== "Closed Won" && r.stage !== "Closed Lost");
   const reps = repsActivity.map((rep) => {
     // A BDR's money = their sourced Closed-Won rows, EXCLUDING any they also own
     // as the AE (those count once, on the AE side) — the Pipeline rule.
     const mineWon = wonRows.filter((r) => same(r.bdr, rep.name) && !same(r.ae, rep.name));
     const ms = moneySeries(mineWon);
     const mm = monthMoney(mineWon);
+    const pipelineVal = openRows
+      .filter((r) => same(r.bdr, rep.name) && !same(r.ae, rep.name))
+      .reduce((a, r) => a + (r.quote || 0), 0);
     return {
       ...rep,
       dealsMo: mm.dealsMo,
@@ -471,6 +480,7 @@ async function build() {
       ibDealsMo: mm.ibDealsMo,
       obArrMo: mm.obArrMo,
       ibArrMo: mm.ibArrMo,
+      pipelineVal,
       series: { ...rep.series, arr: ms.arr, deals: ms.deals, obDeals: ms.obDeals, ibDeals: ms.ibDeals, obArr: ms.obArr, ibArr: ms.ibArr },
     };
   });
@@ -506,6 +516,7 @@ async function build() {
     const ms = moneySeries(mine);
     const mm = monthMoney(mine);
     return {
+      id: list.find((o) => same(o.name, name))?.id ?? null,
       name,
       start: ms.deals.findIndex((v) => v > 0),
       dealsMo: mm.dealsMo, obDealsMo: mm.obDealsMo, ibDealsMo: mm.ibDealsMo,
@@ -549,6 +560,11 @@ async function build() {
     if (dow !== 0 && dow !== 6) workDaysElapsed++;
   }
 
+  // How many of the tracked weeks (`wk`) fall in the current Pacific month — the
+  // same bucket set each rep's `dialsMonth` is already summed over above. Lets the
+  // client turn a per-week dial target into a fair monthly one (weekly × weeks).
+  const weeksInMonth = wk.filter((s, i) => wkEnd[i] > monthStart).length;
+
   return {
     updatedAt: new Date().toISOString(),
     weeks: WEEKS,
@@ -562,6 +578,7 @@ async function build() {
     teamMonth,
     teamToday,
     workDaysElapsed,
+    weeksInMonth,
   };
 }
 

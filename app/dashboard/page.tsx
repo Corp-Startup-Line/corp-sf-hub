@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { QUOTA } from "../lib/data";
+import { DIAL_TARGET_PER_DAY, DEMO_TARGET_PER_WEEK, DIALING_DAYS_PER_WEEK } from "../lib/repTargets";
 
 // Ported from the SFCR Dashboard mockup (SFCR Dashboard.dc.html). Colors and
 // layout are kept as literal inline styles to match that design 1:1, rather
@@ -9,9 +10,11 @@ import { QUOTA } from "../lib/data";
 
 type Cell = { value: string; pace: string; behind: boolean };
 type Metric = { name: string; note: string; daily: Cell; weekly: Cell; monthly: Cell };
-type RepBase = { name: string; role: "BDR" | "AE"; dials: number; demos: number; cpd: number; arr: string };
-type Rep = RepBase & { rank: number };
-type Group = { label: string; showLabel: boolean; reps: Rep[] };
+// dials/demos/cpd are undefined for AEs — /api/sf-metrics tracks no call/meeting
+// activity for AEs, only ARR (see the AE integration note below).
+type RepRow = { name: string; role: "BDR" | "AE"; dials?: number; demos?: number; cpd?: number; arr: number };
+type RankedRep = RepRow & { rank: number };
+type Group = { label: string; showLabel: boolean; note?: string; reps: RankedRep[] };
 
 const cell = (value: string, pace: string, behind: boolean): Cell => ({ value, pace, behind });
 
@@ -25,15 +28,109 @@ function fmtArr(n: number): string {
   return `$${Number.isInteger(k) ? String(k) : k.toFixed(1)}K`;
 }
 
-// Shape of the fields we read off GET /api/sf-metrics for the ARR row (see
-// app/api/sf-metrics/route.ts). Rest of that payload is ignored here for now —
-// the other four metric rows below are still sample data, wired up one by one.
+// Shape of the fields we read off GET /api/sf-metrics for the rows wired up so
+// far (see app/api/sf-metrics/route.ts). The rest of that payload is ignored
+// here for now — remaining rows are still sample data, wired up one by one.
+type RepMetric = {
+  name?: string;
+  dials?: number;
+  dialsWeek?: number;
+  dialsMonth?: number;
+  demosToday?: number;
+  demosWk?: number;
+  demosMonth?: number;
+  stage?: "ramp" | "steady";
+  series?: { arr?: number[] }; // weekly ARR series, oldest → newest
+  arrMo?: number; // ARR closed this month
+  dealsMo?: number; // deals closed this month
+  pipelineVal?: number; // current open (not Closed Won/Lost) pipeline value — a snapshot
+  showRate?: number; // held ÷ booked meetings THIS WEEK ONLY (see BDR_RANKING note below)
+};
+// AEs get no dials/demos/showRate from /api/sf-metrics — only ARR (see aeMine
+// in app/api/sf-metrics/route.ts: AE money = deals they own or self-sourced;
+// no call/meeting activity is tracked per AE anywhere in that route).
+type AeMetric = {
+  name?: string;
+  series?: { obArr?: number[]; ibArr?: number[] }; // weekly, oldest → newest
+  obArrMo?: number; // outbound ARR closed this month
+  ibArrMo?: number; // inbound ARR closed this month
+};
 type SfMetrics = {
   team?: { arr?: number[] };
   teamMonth?: { arrMo?: number };
   teamToday?: { arr?: number };
   workDaysElapsed?: number;
+  weeksInMonth?: number;
+  reps?: RepMetric[];
+  aes?: AeMetric[];
+  updatedAt?: string; // when the server last (re)built this payload
 };
+
+const PACIFIC_TZ = "America/Los_Angeles";
+
+// "8:04 AM PT" — when /api/sf-metrics last rebuilt its cache.
+function fmtSyncedTime(iso: string): string {
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: PACIFIC_TZ,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+  return `${time} PT`;
+}
+
+// "Mon 31 Aug 2026" — today's date, Pacific (matches the rest of this app's
+// Pacific-anchored day/week boundaries).
+function fmtHeaderDate(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PACIFIC_TZ,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+    .formatToParts(d)
+    .reduce<Record<string, string>>((a, p) => ((a[p.type] = p.value), a), {});
+  return `${parts.weekday} ${parts.day} ${parts.month} ${parts.year}`;
+}
+
+
+// BDR RANKING FORMULA (Business Development group, Split view only — see the
+// Rep Leaderboard section below). Weighted composite of month-to-date ARR,
+// month-to-date deals closed, current open-pipeline value, and qualified demos
+// booked-and-showed. Each component is normalized as "this rep's share of the
+// team total" before weighting, so different-unit metrics (dollars, counts,
+// dollars again, counts) combine on a comparable 0–1 scale.
+//
+// CAVEAT: the "demos booked and showed" component is approximated as
+// demosMonth × showRate, but showRate only reflects THIS WEEK's meeting
+// outcomes (see /api/sf-metrics: mtgBookedById/mtgHeldById are scoped to
+// curWkStart..curWkEnd, no monthly history) — so today, this component reads
+// 0 for every rep until HubSpot has logged this week's meeting outcomes. Until
+// then the formula is effectively ARR 40 / Deals 30 / Pipeline 17 out of 87,
+// with the 13% simply contributing nothing to anyone (not favoring one rep
+// over another).
+const BDR_RANKING_WEIGHTS = { arr: 0.4, deals: 0.3, pipeline: 0.17, demosShown: 0.13 };
+
+function bdrRankingScore(reps: RepMetric[]): Map<string, number> {
+  const shareOf = (pick: (r: RepMetric) => number) => {
+    const total = reps.reduce((s, r) => s + pick(r), 0) || 1;
+    return (r: RepMetric) => pick(r) / total;
+  };
+  const arrShare = shareOf((r) => r.arrMo ?? 0);
+  const dealsShare = shareOf((r) => r.dealsMo ?? 0);
+  const pipelineShare = shareOf((r) => r.pipelineVal ?? 0);
+  const demosShownShare = shareOf((r) => (r.demosMonth ?? 0) * (r.showRate ?? 0));
+
+  return new Map(
+    reps.map((r) => [
+      r.name ?? "",
+      BDR_RANKING_WEIGHTS.arr * arrShare(r) +
+        BDR_RANKING_WEIGHTS.deals * dealsShare(r) +
+        BDR_RANKING_WEIGHTS.pipeline * pipelineShare(r) +
+        BDR_RANKING_WEIGHTS.demosShown * demosShownShare(r),
+    ]),
+  );
+}
 
 // Pace targets are derived from the existing monthly/annual QUOTA (app/lib/data.ts)
 // rather than tracked separately: monthly target = QUOTA.teamMonthly; weekly =
@@ -45,50 +142,27 @@ function pace(actual: number | undefined, target: number | undefined): { text: s
   return { text: `${pct}% of pace`, behind: pct < 100 };
 }
 
-// Still-sample rows — Demos Booked, Dials, Calls Per Demo, Show Rate. ARR (the
-// first row) is built live from /api/sf-metrics in the component below.
+// Calls Per Demo is a "lower is better" ratio, so it reads against a fixed
+// target number rather than a "% of pace" (matching the mockup's "Target 55"
+// styling) and flags "behind" when actual is ABOVE target, not below.
+function paceLowerBetter(actual: number | undefined, target: number | undefined): { text: string; behind: boolean } {
+  if (actual == null || !target) return { text: "", behind: false };
+  return { text: `Target ${Math.round(target)}`, behind: actual > target };
+}
+
+// Show Rate: /api/sf-metrics only computes ONE current-week snapshot per rep
+// (one meetings query scoped to curWkStart..curWkEnd — no day-by-day breakdown,
+// no history across other weeks, unlike Dials/Demos which have full series).
+// So none of the three tiers can be shown live yet — dashes instead of the
+// mockup's fake numbers until that backend work happens.
 const SAMPLE_METRICS: Metric[] = [
-  {
-    name: "Demos Booked",
-    note: "Meetings set by BDRs + AEs",
-    daily: cell("7", "117% of pace", false),
-    weekly: cell("41", "102% of pace", false),
-    monthly: cell("168", "105% of pace", false),
-  },
-  {
-    name: "Dials",
-    note: "Connected + attempted calls",
-    daily: cell("412", "91% of pace", true),
-    weekly: cell("2,190", "96% of pace", false),
-    monthly: cell("8,940", "99% of pace", false),
-  },
-  {
-    name: "Calls Per Demo",
-    note: "Dials ÷ demos booked · lower is better",
-    daily: cell("59", "Target 55", true),
-    weekly: cell("53", "Target 55", false),
-    monthly: cell("53", "Target 55", false),
-  },
   {
     name: "Show Rate",
     note: "Held ÷ booked, HubSpot outcomes",
-    daily: cell("71%", "Target 70%", false),
-    weekly: cell("68%", "Target 70%", true),
-    monthly: cell("72%", "Target 70%", false),
+    daily: cell("—", "", false),
+    weekly: cell("—", "", false),
+    monthly: cell("—", "", false),
   },
-];
-
-const BDRS: RepBase[] = [
-  { name: "Marisol Vega", role: "BDR", dials: 612, demos: 11, cpd: 56, arr: "$186K" },
-  { name: "Devon Pryce", role: "BDR", dials: 548, demos: 9, cpd: 61, arr: "$142K" },
-  { name: "Kofi Mensah", role: "BDR", dials: 501, demos: 8, cpd: 63, arr: "$121K" },
-  { name: "Rae Lindqvist", role: "BDR", dials: 388, demos: 5, cpd: 78, arr: "$74K" },
-];
-
-const AES: RepBase[] = [
-  { name: "Priya Anand", role: "AE", dials: 214, demos: 7, cpd: 31, arr: "$298K" },
-  { name: "Jonah Reyes", role: "AE", dials: 190, demos: 6, cpd: 32, arr: "$241K" },
-  { name: "Tom Castellano", role: "AE", dials: 137, demos: 4, cpd: 34, arr: "$118K" },
 ];
 
 const ALERTS = [
@@ -97,12 +171,17 @@ const ALERTS = [
   { text: "Rae Lindqvist at 78 calls per demo, 42% above team." },
 ];
 
-function byArr(a: RepBase, b: RepBase) {
-  return parseFloat(b.arr.replace(/[^0-9.]/g, "")) - parseFloat(a.arr.replace(/[^0-9.]/g, ""));
+function byArr(a: RepRow, b: RepRow) {
+  return b.arr - a.arr;
 }
 
-function rank(list: RepBase[]): Rep[] {
+function rank(list: RepRow[]): RankedRep[] {
   return list.map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+// Last entry in a weekly series (oldest → newest) = the current week.
+function lastOf(series: number[] | undefined): number {
+  return series?.length ? series[series.length - 1] : 0;
 }
 
 const paceDot = (behind: boolean) => (
@@ -136,6 +215,15 @@ const colHeader: CSSProperties = {
 export default function SfcrDashboardPage() {
   const [split, setSplit] = useState(false);
   const [sfMetrics, setSfMetrics] = useState<SfMetrics | null>(null);
+  // Filled in client-side only (like Header.tsx's "Last updated") so the
+  // server-rendered HTML never has to guess "now" and mismatch on hydration.
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Live ARR feed — same endpoint the real Pipeline dashboard uses. Re-pulled
   // every 3 minutes, matching Dashboard.tsx's refresh cadence.
@@ -180,17 +268,181 @@ export default function SfcrDashboardPage() {
     };
   }, [sfMetrics]);
 
-  const metricRows: Metric[] = [arrRow, ...SAMPLE_METRICS];
+  const dialsRow: Metric = useMemo(() => {
+    const reps = sfMetrics?.reps ?? [];
+    const sum = (pick: (r: RepMetric) => number | undefined) =>
+      reps.length ? reps.reduce((s, r) => s + (pick(r) ?? 0), 0) : undefined;
+    const daily = sum((r) => r.dials);
+    const weekly = sum((r) => r.dialsWeek);
+    const monthly = sum((r) => r.dialsMonth);
+
+    const dailyTarget = reps.length
+      ? reps.reduce((s, r) => s + DIAL_TARGET_PER_DAY[r.stage === "ramp" ? "ramp" : "steady"], 0)
+      : undefined;
+    const weeklyTarget = dailyTarget != null ? dailyTarget * DIALING_DAYS_PER_WEEK : undefined;
+    const weeksInMonth = sfMetrics?.weeksInMonth;
+    const monthlyTarget = weeklyTarget != null && weeksInMonth ? weeklyTarget * weeksInMonth : undefined;
+
+    const dailyPace = pace(daily, dailyTarget);
+    const weeklyPace = pace(weekly, weeklyTarget);
+    const monthlyPace = pace(monthly, monthlyTarget);
+    const fmt = (n: number) => n.toLocaleString("en-US");
+
+    return {
+      name: "Dials",
+      note: "Connected + attempted calls",
+      daily: cell(daily != null ? fmt(daily) : "—", dailyPace.text, dailyPace.behind),
+      weekly: cell(weekly != null ? fmt(weekly) : "—", weeklyPace.text, weeklyPace.behind),
+      monthly: cell(monthly != null ? fmt(monthly) : "—", monthlyPace.text, monthlyPace.behind),
+    };
+  }, [sfMetrics]);
+
+  const demosRow: Metric = useMemo(() => {
+    const reps = sfMetrics?.reps ?? [];
+    const sum = (pick: (r: RepMetric) => number | undefined) =>
+      reps.length ? reps.reduce((s, r) => s + (pick(r) ?? 0), 0) : undefined;
+    const daily = sum((r) => r.demosToday);
+    const weekly = sum((r) => r.demosWk);
+    const monthly = sum((r) => r.demosMonth);
+
+    const weeklyTarget = reps.length
+      ? reps.reduce((s, r) => s + DEMO_TARGET_PER_WEEK[r.stage === "ramp" ? "ramp" : "steady"], 0)
+      : undefined;
+    const dailyTarget = weeklyTarget != null ? weeklyTarget / DIALING_DAYS_PER_WEEK : undefined;
+    const weeksInMonth = sfMetrics?.weeksInMonth;
+    const monthlyTarget = weeklyTarget != null && weeksInMonth ? weeklyTarget * weeksInMonth : undefined;
+
+    const dailyPace = pace(daily, dailyTarget);
+    const weeklyPace = pace(weekly, weeklyTarget);
+    const monthlyPace = pace(monthly, monthlyTarget);
+    const fmt = (n: number) => n.toLocaleString("en-US");
+
+    return {
+      name: "Demos Booked",
+      note: "Meetings set by BDRs + AEs",
+      daily: cell(daily != null ? fmt(daily) : "—", dailyPace.text, dailyPace.behind),
+      weekly: cell(weekly != null ? fmt(weekly) : "—", weeklyPace.text, weeklyPace.behind),
+      monthly: cell(monthly != null ? fmt(monthly) : "—", monthlyPace.text, monthlyPace.behind),
+    };
+  }, [sfMetrics]);
+
+  // Calls Per Demo = Dials ÷ Demos Booked at each tier — no new server field
+  // needed, just the same rep-level dials/demos already summed above. The
+  // target ratio is (dial target ÷ demo target) — algebraically the same
+  // number at every tier since both targets scale by the same day/week/month
+  // factors, so it's computed once off the weekly targets.
+  const cpdRow: Metric = useMemo(() => {
+    const reps = sfMetrics?.reps ?? [];
+    const sum = (pick: (r: RepMetric) => number | undefined) =>
+      reps.length ? reps.reduce((s, r) => s + (pick(r) ?? 0), 0) : undefined;
+    const ratio = (n: number | undefined, d: number | undefined) => (n != null && d ? n / d : undefined);
+
+    const dialsDaily = sum((r) => r.dials);
+    const dialsWeekly = sum((r) => r.dialsWeek);
+    const dialsMonthly = sum((r) => r.dialsMonth);
+    const demosDaily = sum((r) => r.demosToday);
+    const demosWeekly = sum((r) => r.demosWk);
+    const demosMonthly = sum((r) => r.demosMonth);
+
+    const daily = ratio(dialsDaily, demosDaily);
+    const weekly = ratio(dialsWeekly, demosWeekly);
+    const monthly = ratio(dialsMonthly, demosMonthly);
+
+    const dialWeeklyTarget = reps.length
+      ? reps.reduce((s, r) => s + DIAL_TARGET_PER_DAY[r.stage === "ramp" ? "ramp" : "steady"], 0) * DIALING_DAYS_PER_WEEK
+      : undefined;
+    const demoWeeklyTarget = reps.length
+      ? reps.reduce((s, r) => s + DEMO_TARGET_PER_WEEK[r.stage === "ramp" ? "ramp" : "steady"], 0)
+      : undefined;
+    const targetRatio = ratio(dialWeeklyTarget, demoWeeklyTarget);
+
+    const dailyPace = paceLowerBetter(daily, targetRatio);
+    const weeklyPace = paceLowerBetter(weekly, targetRatio);
+    const monthlyPace = paceLowerBetter(monthly, targetRatio);
+    const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
+
+    return {
+      name: "Calls Per Demo",
+      note: "Dials ÷ demos booked · lower is better",
+      daily: cell(daily != null ? fmt(daily) : "—", dailyPace.text, dailyPace.behind),
+      weekly: cell(weekly != null ? fmt(weekly) : "—", weeklyPace.text, weeklyPace.behind),
+      monthly: cell(monthly != null ? fmt(monthly) : "—", monthlyPace.text, monthlyPace.behind),
+    };
+  }, [sfMetrics]);
+
+  // Fixed display order; each row comes from either a live computation above or
+  // a still-sample entry in SAMPLE_METRICS, keyed by name so wiring up the next
+  // row is just adding one more entry here.
+  const ROW_ORDER = ["ARR", "Demos Booked", "Dials", "Calls Per Demo", "Show Rate"];
+  const rowsByName: Record<string, Metric> = {
+    ARR: arrRow,
+    Dials: dialsRow,
+    "Demos Booked": demosRow,
+    "Calls Per Demo": cpdRow,
+    ...Object.fromEntries(SAMPLE_METRICS.map((m) => [m.name, m])),
+  };
+  const metricRows: Metric[] = ROW_ORDER.map((name) => rowsByName[name]);
+
+  // BDR rows: week-to-date Dials/Demos/Calls-per-Demo/ARR, straight off the same
+  // per-rep fields the metric rows above already sum across the team.
+  const bdrRows: RepRow[] = useMemo(
+    () =>
+      (sfMetrics?.reps ?? []).map((r) => {
+        // Month-to-date, matching the BDR ranking formula's own period — a rep
+        // ranked #1 off this month's numbers should show numbers to match,
+        // not a week-to-date column that reads 0 for anyone who closed early.
+        const dials = r.dialsMonth;
+        const demos = r.demosMonth;
+        return {
+          name: r.name ?? "—",
+          role: "BDR" as const,
+          dials,
+          demos,
+          cpd: dials != null && demos ? Math.round(dials / demos) : undefined,
+          arr: r.arrMo ?? 0,
+        };
+      }),
+    [sfMetrics],
+  );
+
+  // AE rows: ARR only — no dials/demos/show-rate is tracked per AE anywhere in
+  // /api/sf-metrics (see the AeMetric comment above), so those cells show "—".
+  // Month-to-date ARR, same period as the BDR rows above, so Combined view
+  // (which merges both) isn't mixing weekly and monthly numbers in one column.
+  const aeRows: RepRow[] = useMemo(
+    () =>
+      (sfMetrics?.aes ?? []).map((a) => ({
+        name: a.name ?? "—",
+        role: "AE" as const,
+        dials: undefined,
+        demos: undefined,
+        cpd: undefined,
+        arr: (a.obArrMo ?? 0) + (a.ibArrMo ?? 0),
+      })),
+    [sfMetrics],
+  );
+
+  // BDR ranking formula only applies within the Business Development group
+  // (Split view) — Combined view stays a straight cross-role ARR comparison,
+  // and AEs keep their ARR-only sort (no deals/pipeline/demos formula defined
+  // for them).
+  const bdrScoreByName = useMemo(() => bdrRankingScore(sfMetrics?.reps ?? []), [sfMetrics]);
+  const byBdrScore = (a: RepRow, b: RepRow) => (bdrScoreByName.get(b.name) ?? 0) - (bdrScoreByName.get(a.name) ?? 0);
 
   const groups: Group[] = useMemo(
     () =>
       split
         ? [
-            { label: "Business Development", showLabel: true, reps: rank([...BDRS].sort(byArr)) },
-            { label: "Account Executives", showLabel: true, reps: rank([...AES].sort(byArr)) },
+            {
+              label: "Business Development",
+              showLabel: true,
+              note: "Ranked by weighted score — ARR 40% · deals closed 30% · pipeline 17% · demos booked & showed 13%",
+              reps: rank([...bdrRows].sort(byBdrScore)),
+            },
+            { label: "Account Executives", showLabel: true, reps: rank([...aeRows].sort(byArr)) },
           ]
-        : [{ label: "All reps", showLabel: false, reps: rank([...BDRS, ...AES].sort(byArr)) }],
-    [split],
+        : [{ label: "All reps", showLabel: false, reps: rank([...bdrRows, ...aeRows].sort(byArr)) }],
+    [split, bdrRows, aeRows, bdrScoreByName],
   );
 
   return (
@@ -227,9 +479,11 @@ export default function SfcrDashboardPage() {
             <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>Live · HubSpot</span>
           </div>
           <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#8A8279" }}>
-            Synced 8:04 AM PT
+            {sfMetrics?.updatedAt ? `Synced ${fmtSyncedTime(sfMetrics.updatedAt)}` : "Syncing…"}
           </div>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>Mon 31 Aug 2026</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            {now ? fmtHeaderDate(now) : ""}
+          </div>
         </div>
       </header>
 
@@ -278,7 +532,7 @@ export default function SfcrDashboardPage() {
           <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: "-0.01em" }}>Rep Leaderboard</h2>
             <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "#8A8279" }}>
-              Week to date
+              Month to date
             </span>
           </div>
           <div style={{ display: "flex", gap: 4 }}>
@@ -324,8 +578,13 @@ export default function SfcrDashboardPage() {
         {groups.map((g) => (
           <div key={g.label} style={{ marginTop: 28 }}>
             {g.showLabel && (
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8A8279", paddingBottom: 8 }}>
-                {g.label}
+              <div style={{ paddingBottom: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8A8279" }}>
+                  {g.label}
+                </div>
+                {g.note && (
+                  <div style={{ fontSize: 11, fontWeight: 500, color: "#A9A199", marginTop: 2 }}>{g.note}</div>
+                )}
               </div>
             )}
             <div
@@ -360,10 +619,18 @@ export default function SfcrDashboardPage() {
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#8A8279" }}>
                   {r.role}
                 </div>
-                <div style={{ fontSize: 16, fontWeight: 500, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.dials}</div>
-                <div style={{ fontSize: 16, fontWeight: 500, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.demos}</div>
-                <div style={{ fontSize: 16, fontWeight: 500, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.cpd}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.arr}</div>
+                <div style={{ fontSize: 16, fontWeight: 500, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {r.dials != null ? r.dials.toLocaleString("en-US") : "—"}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 500, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {r.demos != null ? r.demos.toLocaleString("en-US") : "—"}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 500, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {r.cpd != null ? r.cpd.toLocaleString("en-US") : "—"}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {fmtArr(r.arr)}
+                </div>
               </div>
             ))}
           </div>

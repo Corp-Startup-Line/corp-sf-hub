@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import AdminImpersonate from "./AdminImpersonate";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/career-progression", label: "Career Progression" },
 ];
 
 export default function Sidebar() {
@@ -39,6 +41,7 @@ export default function Sidebar() {
           </Link>
         );
       })}
+      <AdminImpersonate />
     </nav>
   );
 }
