@@ -367,6 +367,7 @@ async function build() {
   const curWkEnd = wkEnd[wkEnd.length - 1];
   const mtgBookedById = new Map<string, number>();
   const mtgHeldById = new Map<string, number>();
+  const _outcomeTally: Record<string, number> = {}; // TEMP diagnostic
   if (bdrIds.length) {
     let after = "";
     do {
@@ -386,6 +387,8 @@ async function build() {
         const owner = `${m.properties?.hubspot_owner_id ?? ""}`;
         if (!owner) continue;
         mtgBookedById.set(owner, (mtgBookedById.get(owner) || 0) + 1);
+        const _oc = `${m.properties?.hs_meeting_outcome ?? "(empty)"}`; // TEMP
+        _outcomeTally[_oc] = (_outcomeTally[_oc] || 0) + 1; // TEMP
         if (`${m.properties?.hs_meeting_outcome ?? ""}` === "COMPLETED") {
           mtgHeldById.set(owner, (mtgHeldById.get(owner) || 0) + 1);
         }
@@ -545,6 +548,7 @@ async function build() {
     aes,
     team,
     teamMonth,
+    _outcomeTally, // TEMP diagnostic — remove after showRate check
   };
 }
 
