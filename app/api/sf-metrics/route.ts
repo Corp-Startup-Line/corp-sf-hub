@@ -46,7 +46,7 @@ const DEFAULT_REPS =
   "parker@trycorgi.com,jackson@trycorgi.com,broderick@trycorgi.com," +
   "richard@corgi.insure,dino@corgi.insure,garrett.peterson@corgi.insure," +
   "ethan.w@trycorgi.com,jeanette@trycorgi.com,humbert@corgi.com," +
-  "patrick@corgi.com,gabriel@corgi.com,hsuan@corgi.com";
+  "patrick@corgi.com,gabriel@corgi.com,hsuan@corgi.com,vinod@corgi.com";
 const REPS = (process.env.SF_REPS || DEFAULT_REPS)
   .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 // Names (or fragments) to drop from the BDR section only — AMs / pure AEs who sit

@@ -34,6 +34,7 @@ export const TEAM_BDR_NAMES = [
   "Patrick Gullixson",
   "Gabriel Perez",
   "Shen Shen",
+  "Vinod Pandey",
 ] as const;
 
 // FORMER BDRs — people who have LEFT the BDR seat but whose past Closed-Won deals
@@ -116,6 +117,7 @@ export const CORP_TEAM_NAMES = [
   "Gunner Dohrenwend",
   "Gabriel Perez",
   "Shen Shen",
+  "Vinod Pandey",
 ] as const;
 
 // Fast lookups used by the server route (built from the lists above — don't edit).
